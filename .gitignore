@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/*.log
+logs/*.json
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project Specific
+config/secrets.yaml
+config/local_*.yaml
+*.db
+*.sqlite3
+
+# MQTT & IoT
+mqtt_data/
+
+# AI/ML Models
+ml_models/*.pkl
+ml_models/*.h5
+ml_models/*.joblib
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Documentation builds
+docs/_build/
+
+# Environment variables
+.env
+.env.local
+
+# Word documents (keeping overview)
+!Minor Project Overview.docx

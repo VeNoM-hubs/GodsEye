@@ -1,0 +1,73 @@
+# Default Configuration for GodsEye
+
+environment: development
+debug: true
+log_level: INFO
+
+mqtt:
+  broker_host: localhost
+  broker_port: 1883
+  username: null
+  password: null
+  topics:
+    access_events: godseye/access
+    honeypot_events: godseye/honeypot
+    network_events: godseye/network
+    endpoint_events: godseye/endpoint
+    teapot_events: godseye/teapot
+
+storage:
+  storage_type: json
+  log_directory: logs
+  retention_days: 90
+  db_host: null
+  db_port: null
+  db_name: null
+  db_user: null
+  db_password: null
+
+alerts:
+  alert_threshold: 0.7
+  enable_notifications: true
+  notification_channels:
+    - log
+    - console
+  severity_levels:
+    INFO: 1
+    LOW: 2
+    MEDIUM: 3
+    HIGH: 4
+    CRITICAL: 5
+
+access_control:
+  max_failed_attempts: 3
+  failed_attempt_window_seconds: 300
+  normal_access_hours_start: 6
+  normal_access_hours_end: 22
+  known_locations:
+    - Server Room A
+    - Control Room
+    - Main Entrance
+  require_multi_factor: true
+
+honeypot:
+  enabled: true
+  honeypot_devices: []
+  alert_on_any_interaction: true
+
+teapot:
+  enabled: true
+  decoy_cards:
+    - FAKE_CARD_001
+    - FAKE_CARD_002
+    - DECOY_999
+  decoy_fingerprints:
+    - FAKE_FP_001
+    - FAKE_FP_002
+
+ml:
+  enabled: false
+  model_type: isolation_forest
+  training_data_path: null
+  model_save_path: ml_models
+  retrain_interval_hours: 24
