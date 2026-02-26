@@ -1,0 +1,118 @@
+/** @import must precede all other statements */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+  */
+  :root {
+    --background: 220 20% 6%;
+    --foreground: 210 20% 98%;
+
+    --card: 220 20% 8%;
+    --card-foreground: 210 20% 98%;
+
+    --popover: 220 20% 8%;
+    --popover-foreground: 210 20% 98%;
+
+    --primary: 200 100% 50%;
+    --primary-foreground: 220 20% 6%;
+
+    --secondary: 220 20% 12%;
+    --secondary-foreground: 210 20% 98%;
+
+    --muted: 220 20% 12%;
+    --muted-foreground: 215 15% 65%;
+
+    --accent: 200 100% 50%;
+    --accent-foreground: 220 20% 6%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 20% 98%;
+
+    --border: 220 20% 14%;
+    --input: 220 20% 14%;
+    --ring: 200 100% 50%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 220 20% 5%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 200 100% 50%;
+    --sidebar-primary-foreground: 220 20% 6%;
+    --sidebar-accent: 220 20% 10%;
+    --sidebar-accent-foreground: 200 100% 50%;
+    --sidebar-border: 220 20% 10%;
+    --sidebar-ring: 200 100% 50%;
+  }
+
+  .dark {
+    --background: 220 20% 6%;
+    --foreground: 210 20% 98%;
+    --card: 220 20% 8%;
+    --card-foreground: 210 20% 98%;
+    --popover: 220 20% 8%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 200 100% 50%;
+    --primary-foreground: 220 20% 6%;
+    --secondary: 220 20% 12%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 220 20% 12%;
+    --muted-foreground: 215 15% 65%;
+    --accent: 200 100% 50%;
+    --accent-foreground: 220 20% 6%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220 20% 14%;
+    --input: 220 20% 14%;
+    --ring: 200 100% 50%;
+    --sidebar-background: 220 20% 5%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 200 100% 50%;
+    --sidebar-primary-foreground: 220 20% 6%;
+    --sidebar-accent: 220 20% 10%;
+    --sidebar-accent-foreground: 200 100% 50%;
+    --sidebar-border: 220 20% 10%;
+    --sidebar-ring: 200 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  :where(p, span, li, h1, h2, h3, h4, h5, h6, a, button, label, td, th) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  pre,
+  code {
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .glass {
+    @apply bg-background/40 backdrop-blur-xl border border-border/40;
+  }
+
+  .subtle-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.03) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+
+  .glow {
+    box-shadow: 0 0 20px rgba(0, 150, 255, 0.15);
+  }
+}
