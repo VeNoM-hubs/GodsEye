@@ -1,0 +1,250 @@
+-- ================================================
+-- GODSEYE FINAL DATABASE SETUP
+-- Run this AFTER connecting to database:
+-- \c godseye
+-- ================================================
+
+-- ================================
+-- USERS
+-- ================================
+CREATE TABLE IF NOT EXISTS users (
+    user_id VARCHAR(50) PRIMARY KEY,
+    full_name VARCHAR(120) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    access_level INT NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ================================
+-- RESOURCES
+-- ================================
+CREATE TABLE IF NOT EXISTS resources (
+    resource_id VARCHAR(50) PRIMARY KEY,
+    resource_name VARCHAR(120) NOT NULL,
+    resource_type VARCHAR(30) NOT NULL,
+    required_access_level INT NOT NULL,
+    is_sensitive BOOLEAN DEFAULT FALSE
+);
+
+-- ================================
+-- PHYSICAL LOGS
+-- ================================
+CREATE TABLE IF NOT EXISTS physical_logs (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
+    resource_id VARCHAR(50) NOT NULL REFERENCES resources(resource_id) ON DELETE RESTRICT,
+    access_status VARCHAR(20) NOT NULL,
+    event_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ================================
+-- DIGITAL LOGS
+-- ================================
+CREATE TABLE IF NOT EXISTS digital_logs (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
+    resource_id VARCHAR(50) NOT NULL REFERENCES resources(resource_id) ON DELETE RESTRICT,
+    action_type VARCHAR(50) NOT NULL,
+    raw_severity VARCHAR(20) NOT NULL,
+    event_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ================================
+-- UNIFIED MAIN LOGS
+-- ================================
+CREATE TABLE IF NOT EXISTS main_logs (
+    id BIGSERIAL PRIMARY KEY,
+    source VARCHAR(20) NOT NULL,
+    source_ref_id BIGINT NOT NULL,
+    user_id VARCHAR(50) NOT NULL REFERENCES users(user_id),
+    resource_id VARCHAR(50) NOT NULL REFERENCES resources(resource_id),
+    event_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    event_time TIMESTAMP NOT NULL,
+    correlation_flag BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ================================
+-- MITRE TECHNIQUES
+-- ================================
+CREATE TABLE IF NOT EXISTS mitre_techniques (
+    technique_id VARCHAR(20) PRIMARY KEY,
+    technique_name VARCHAR(200) NOT NULL,
+    tactic VARCHAR(100) NOT NULL
+);
+
+-- ================================
+-- THREATS
+-- ================================
+CREATE TABLE IF NOT EXISTS threats (
+    threat_id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL REFERENCES users(user_id),
+    threat_pattern VARCHAR(120) NOT NULL,
+    mitre_id VARCHAR(20) REFERENCES mitre_techniques(technique_id),
+    risk_score INT NOT NULL,
+    first_seen TIMESTAMP NOT NULL,
+    last_seen TIMESTAMP NOT NULL,
+    event_count INT DEFAULT 1,
+    status VARCHAR(20) DEFAULT 'ACTIVE'
+);
+
+-- ================================
+-- INDEXES (Performance)
+-- ================================
+CREATE INDEX IF NOT EXISTS idx_main_time ON main_logs(event_time);
+CREATE INDEX IF NOT EXISTS idx_main_severity ON main_logs(severity);
+CREATE INDEX IF NOT EXISTS idx_threat_user ON threats(user_id);
+CREATE INDEX IF NOT EXISTS idx_physical_user ON physical_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_digital_user ON digital_logs(user_id);
+
+-- ================================================
+-- TRIGGER: PHYSICAL → MAIN
+-- ================================================
+CREATE OR REPLACE FUNCTION insert_main_log_from_physical()
+RETURNS TRIGGER AS $$
+DECLARE
+    required_level INT;
+    user_level INT;
+    computed_severity TEXT;
+BEGIN
+    SELECT required_access_level INTO required_level
+    FROM resources WHERE resource_id = NEW.resource_id;
+
+    SELECT access_level INTO user_level
+    FROM users WHERE user_id = NEW.user_id;
+
+    IF user_level < required_level OR NEW.access_status = 'DENIED' THEN
+        computed_severity := 'HIGH';
+    ELSE
+        computed_severity := 'LOW';
+    END IF;
+
+    INSERT INTO main_logs (
+        source,
+        source_ref_id,
+        user_id,
+        resource_id,
+        event_type,
+        severity,
+        event_time
+    )
+    VALUES (
+        'PHYSICAL',
+        NEW.id,
+        NEW.user_id,
+        NEW.resource_id,
+        NEW.access_status,
+        computed_severity,
+        NEW.event_time
+    );
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_physical_to_main
+AFTER INSERT ON physical_logs
+FOR EACH ROW
+EXECUTE FUNCTION insert_main_log_from_physical();
+
+-- ================================================
+-- TRIGGER: DIGITAL → MAIN
+-- ================================================
+CREATE OR REPLACE FUNCTION insert_main_log_from_digital()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO main_logs (
+        source,
+        source_ref_id,
+        user_id,
+        resource_id,
+        event_type,
+        severity,
+        event_time
+    )
+    VALUES (
+        'DIGITAL',
+        NEW.id,
+        NEW.user_id,
+        NEW.resource_id,
+        NEW.action_type,
+        CASE
+            WHEN NEW.raw_severity = 'HIGH' THEN 'HIGH'
+            WHEN NEW.raw_severity = 'MEDIUM' THEN 'MEDIUM'
+            ELSE 'LOW'
+        END,
+        NEW.event_time
+    );
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_digital_to_main
+AFTER INSERT ON digital_logs
+FOR EACH ROW
+EXECUTE FUNCTION insert_main_log_from_digital();
+
+-- ================================================
+-- TRIGGER: MAIN → THREAT (Escalation Logic)
+-- ================================================
+CREATE OR REPLACE FUNCTION detect_threat()
+RETURNS TRIGGER AS $$
+DECLARE
+    existing_id BIGINT;
+BEGIN
+    IF NEW.severity = 'HIGH' THEN
+
+        SELECT threat_id INTO existing_id
+        FROM threats
+        WHERE user_id = NEW.user_id
+        AND status = 'ACTIVE'
+        AND last_seen > NOW() - INTERVAL '10 minutes'
+        LIMIT 1;
+
+        IF existing_id IS NOT NULL THEN
+            UPDATE threats
+            SET event_count = event_count + 1,
+                risk_score = risk_score + 10,
+                last_seen = NEW.event_time
+            WHERE threat_id = existing_id;
+        ELSE
+            INSERT INTO threats (
+                user_id,
+                threat_pattern,
+                mitre_id,
+                risk_score,
+                first_seen,
+                last_seen
+            )
+            VALUES (
+                NEW.user_id,
+                'Unauthorized Access Pattern',
+                'T1078',
+                70,
+                NEW.event_time,
+                NEW.event_time
+            );
+        END IF;
+
+        UPDATE main_logs
+        SET correlation_flag = TRUE
+        WHERE id = NEW.id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_main_to_threat
+AFTER INSERT ON main_logs
+FOR EACH ROW
+EXECUTE FUNCTION detect_threat();
+
+-- ================================================
+-- SETUP COMPLETE
+-- ================================================
+
+SELECT 'GodsEye final setup initialized successfully.' AS status; 
