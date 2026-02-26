@@ -1,28 +1,28 @@
-import { Terminal, ShieldAlert, Info, AlertTriangle, Radio } from "lucide-react";
-import { CyberLog } from "@shared/cyber-api";
+import { Terminal, ShieldAlert, Info, AlertTriangle, Radio, Skull } from "lucide-react";
+import type { GodsEyeEvent, AlertSeverity } from "@shared/cyber-api";
+import { getEventUser, getEventResource, getEventSeverity, getEventDescription } from "@shared/cyber-api";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface LogViewerProps {
-  logs: CyberLog[];
+  events: GodsEyeEvent[];
 }
 
-const severityColors = {
-  low: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
-  medium: "text-amber-400 bg-amber-400/10 border-amber-400/20",
-  high: "text-orange-500 bg-orange-500/10 border-orange-500/20",
-  critical: "text-rose-500 bg-rose-500/10 border-rose-500/20",
+const severityMeta: Record<AlertSeverity, { color: string; Icon: React.ElementType }> = {
+  INFO: { color: "text-sky-400 bg-sky-400/10 border-sky-400/20", Icon: Info },
+  LOW: { color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20", Icon: Info },
+  MEDIUM: { color: "text-amber-400 bg-amber-400/10 border-amber-400/20", Icon: Radio },
+  HIGH: { color: "text-orange-500 bg-orange-500/10 border-orange-500/20", Icon: AlertTriangle },
+  CRITICAL: { color: "text-rose-500 bg-rose-500/10 border-rose-500/20", Icon: Skull },
 };
 
-const severityIcons = {
-  low: Info,
-  medium: Radio,
-  high: AlertTriangle,
-  critical: ShieldAlert,
+const sourceLabel: Record<string, { label: string; color: string }> = {
+  physical: { label: "PHY", color: "text-cyan-400 bg-cyan-400/10 border-cyan-400/20" },
+  digital: { label: "DIG", color: "text-violet-400 bg-violet-400/10 border-violet-400/20" },
 };
 
-export function LogViewer({ logs }: LogViewerProps) {
+export function LogViewer({ events }: LogViewerProps) {
   return (
     <div className="flex flex-col h-full rounded-2xl border border-border/50 bg-card/30 backdrop-blur-md overflow-hidden relative shadow-2xl">
       <div className="scanline opacity-5" />
@@ -35,12 +35,12 @@ export function LogViewer({ logs }: LogViewerProps) {
             <h3 className="font-bold text-lg tracking-tight">System Events Stream</h3>
             <p className="text-xs text-muted-foreground flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Live monitoring active - {logs.length} events processed
+              Live — {events.length} events
             </p>
           </div>
         </div>
         <div className="flex gap-2">
-          {["All", "Critical", "Warning"].map((filter) => (
+          {["All", "Critical", "Physical"].map((filter) => (
             <button
               key={filter}
               className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors"
@@ -54,12 +54,14 @@ export function LogViewer({ logs }: LogViewerProps) {
       <ScrollArea className="flex-1 p-4 h-[400px]">
         <div className="space-y-3">
           <AnimatePresence initial={false}>
-            {logs.map((log) => {
-              const Icon = severityIcons[log.severity];
+            {events.map((ge) => {
+              const e = ge.event;
+              const severity = getEventSeverity(e);
+              const { color, Icon } = severityMeta[severity] ?? severityMeta.INFO;
+              const src = sourceLabel[ge.source] ?? sourceLabel.digital;
               return (
                 <motion.div
-                  key={log.id}
-                  layout
+                  key={e.event_id}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
@@ -68,21 +70,32 @@ export function LogViewer({ logs }: LogViewerProps) {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={cn("p-1.5 rounded-lg border", severityColors[log.severity])}>
+                      <div className={cn("p-1.5 rounded-lg border", color)}>
                         <Icon className="w-4 h-4" />
                       </div>
-                      <div>
-                        <span className="text-xs font-mono text-muted-foreground">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
-                        <span className="mx-2 text-xs font-bold text-foreground">{log.deviceName}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase", src.color)}>
+                          {src.label}
+                        </span>
+                        <span className="text-xs font-mono text-muted-foreground">
+                          [{new Date(e.timestamp).toLocaleTimeString()}]
+                        </span>
+                        <span className="text-xs font-bold text-foreground">
+                          {getEventUser(e)}
+                        </span>
                       </div>
                     </div>
-                    <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase", severityColors[log.severity])}>
-                      {log.severity}
+                    <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase", color)}>
+                      {severity}
                     </span>
                   </div>
                   <div className="pl-11">
-                    <p className="text-sm font-semibold text-foreground leading-tight">{log.event}</p>
-                    <p className="text-xs text-muted-foreground mt-1 font-mono">{log.details}</p>
+                    <p className="text-sm font-semibold text-foreground leading-tight">
+                      {e.event_type.toUpperCase()}: {getEventDescription(e)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1 font-mono">
+                      Resource: {getEventResource(e)}
+                    </p>
                   </div>
                   <div className="absolute right-2 bottom-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button className="text-[10px] font-bold text-primary underline">INSPECT</button>
