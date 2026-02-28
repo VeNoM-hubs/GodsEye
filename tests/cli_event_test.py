@@ -1,6 +1,6 @@
 """
-Interactive CLI Test for Event Receiver
-Allows manual entry of event data for testing
+Interactive CLI Test for Database Event Injection
+Allows manual entry of event data for testing with PostgreSQL database
 """
 
 import sys
@@ -11,26 +11,66 @@ from typing import Optional
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.event_receiver import EventReceiver
+from backend.db_storage import get_db
 
 
 class InteractiveCLI:
-    """Interactive CLI for testing event receiver"""
+    """Interactive CLI for testing database event injection"""
     
     def __init__(self):
-        self.receiver = EventReceiver()
-        self.register_handlers()
+        print("\n🔌 Connecting to database...")
+        print("📄 Using credentials from config/db_config.yaml")
+        try:
+            self.db = get_db()
+            print("✅ Connected to PostgreSQL database!")
+        except Exception as e:
+            print(f"❌ Connection failed: {e}")
+            print("\nMake sure:")
+            print("  1. PostgreSQL is running")
+            print("  2. Database 'godseye' exists")
+            print("  3. Credentials in config/db_config.yaml are correct")
+            print("  4. Tables are created (run database/setup_postgres.sql)")
+            print("  5. Test data exists (run: python tests/seed_database.py)")
+            raise
+        
+        # Load users and resources for selection
+        self.users = self.db.get_all_users()
+        self.resources = self.db.get_all_resources()
+        
+        if not self.users or not self.resources:
+            print("\n⚠️  Warning: No users or resources found in database!")
+            print("Run 'python tests/seed_database.py' to create test data")
+        
+        self.events_logged = 0
+        
+        self.events_logged = 0
+    
+    def list_users(self) -> list:
+        """Show available users"""
+        print("\n👥 Available Users:")
+        for i, user in enumerate(self.users[:10], 1):  # Show first 10
+            print(f"  {i}. {user['user_id']} - {user['full_name']} (Level {user['access_level']})")
+        if len(self.users) > 10:
+            print(f"  ... and {len(self.users) - 10} more")
+        return self.users
+    
+    def list_resources(self, resource_type: Optional[str] = None) -> list:
+        """Show available resources"""
+        resources = self.resources
+        if resource_type:
+            resources = [r for r in resources if r['resource_type'] == resource_type]
+        
+        print(f"\n🏢 Available Resources ({len(resources)}):")
+        for i, res in enumerate(resources[:10], 1):  # Show first 10
+            sensitive = " [SENSITIVE]" if res.get('is_sensitive') else ""
+            print(f"  {i}. {res['resource_id']} - {res['resource_name']} (Level {res['required_access_level']}){sensitive}")
+        if len(resources) > 10:
+            print(f"  ... and {len(resources) - 10} more")
+        return resources
     
     def register_handlers(self):
-        """Register simple handlers for demonstration"""
-        def handler(event):
-            print(f"\n✅ Event processed successfully!")
-            print(f"   Event ID: {event.event_id}")
-            print(f"   Type: {event.event_type}")
-        
-        from backend.schemas import EventType
-        for event_type in EventType:
-            self.receiver.register_handler(event_type, handler)
+        """Legacy method - no longer needed"""
+        pass
     
     def clear_screen(self):
         """Clear the console screen"""
@@ -73,276 +113,136 @@ class InteractiveCLI:
             except ValueError:
                 print("⚠️  Please enter a valid number")
     
+    
     def create_access_event(self) -> dict:
-        """Interactive creation of access event"""
+        """Interactive creation of physical access event"""
         print("\n" + "="*80)
-        print("📝 Create Access Event")
+        print("📝 Create Physical Access Event (RFID/Card Scan)")
         print("="*80)
         
-        event = {
-            "event_type": "access",
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        # Show physical doors
+        doors = [r for r in self.resources if r['resource_type'] == 'physical_door']
+        print("\n🚪 Available Doors:")
+        for i, door in enumerate(doors, 1):
+            print(f"  {i}. {door['resource_id']} - {door['resource_name']} (Level {door['required_access_level']} required)")
         
-        # Device Information
-        print("\n🔧 Device Information:")
-        event["device_id"] = self.get_input("Device ID", "access_door_01")
-        event["location"] = self.get_input("Location", "Server Room A")
+        # Select resource
+        resource_choice = int(self.get_input(f"Select door (1-{len(doors)})", "1")) - 1
+        if 0 <= resource_choice < len(doors):
+            resource_id = doors[resource_choice]['resource_id']
+        else:
+            resource_id = self.get_input("Or enter resource_id manually", "door_server_room")
         
-        # Access Method
-        print("\n🔐 Access Method:")
-        method = self.get_choice("Select access method:", [
-            "rfid",
-            "fingerprint",
-            "rfid_fingerprint"
-        ])
-        event["access_method"] = method
+        # Show users
+        self.list_users()
+        user_choice = int(self.get_input(f"Select user (1-{min(10, len(self.users))})", "1")) - 1
+        if 0 <= user_choice < len(self.users):
+            user_id = self.users[user_choice]['user_id']
+        else:
+            user_id = self.get_input("Or enter user_id manually", "staff_frank")
         
-        # Credentials
-        print("\n🎫 Credentials:")
-        if method in ["rfid", "rfid_fingerprint"]:
-            event["card_id"] = self.get_input("Card ID", "CARD_12345")
-        
-        if method in ["fingerprint", "rfid_fingerprint"]:
-            event["fingerprint_id"] = self.get_input("Fingerprint ID", "FP_USER_001")
-        
-        # User ID (optional)
-        user_id = self.get_input("User ID (optional, press Enter to skip)", required=False)
-        if user_id:
-            event["user_id"] = user_id
-        
-        # Status
+        # Access Status
         print("\n✅ Access Status:")
         status = self.get_choice("Select status:", [
-            "success",
-            "failed",
-            "denied",
-            "anomaly"
+            "GRANTED",
+            "DENIED",
+            "FAILED"
         ])
-        event["status"] = status
         
-        # Failure reason (if failed/denied)
-        if status in ["failed", "denied"]:
-            reason = self.get_input("Failure reason", "Invalid credentials", required=False)
-            if reason:
-                event["failure_reason"] = reason
+        return {
+            "user_id": user_id,
+            "resource_id": resource_id,
+            "access_status": status,
+            "event_type": "physical"
+        }
+    
+    
+    def create_digital_event(self) -> dict:
+        """Interactive creation of digital log event"""
+        print("\n" + "="*80)
+        print("💻 Create Digital Event (File Access, Process, Login)")
+        print("="*80)
         
-        return event
+        # Show digital resources (databases, servers, file systems)
+        digital_resources = [r for r in self.resources if r['resource_type'] in ['database', 'server', 'file_system', 'application']]
+        print("\n📂 Available Digital Resources:")
+        for i, res in enumerate(digital_resources[:15], 1):
+            print(f"  {i}. {res['resource_id']} - {res['resource_name']} (Level {res['required_access_level']})")
+        
+        # Select resource
+        resource_choice = int(self.get_input(f"Select resource (1-{min(15, len(digital_resources))})", "1")) - 1
+        if 0 <= resource_choice < len(digital_resources):
+            resource_id = digital_resources[resource_choice]['resource_id']
+        else:
+            resource_id = self.get_input("Or enter resource_id manually", "db_production")
+        
+        # Show users
+        self.list_users()
+        user_choice = int(self.get_input(f"Select user (1-{min(10, len(self.users))})", "1")) - 1
+        if 0 <= user_choice < len(self.users):
+            user_id = self.users[user_choice]['user_id']
+        else:
+            user_id = self.get_input("Or enter user_id manually", "staff_frank")
+        
+        # Action Type
+        print("\n⚡ Action Type:")
+        action = self.get_choice("Select action:", [
+            "FILE_ACCESS",
+            "FILE_WRITE",
+            "FILE_DELETE",
+            "PROCESS_CREATE",
+            "NETWORK_CONNECTION",
+            "LOGIN",
+            "QUERY_EXECUTION",
+            "DATA_EXPORT"
+        ])
+        
+        # Severity
+        print("\n🚨 Raw Severity:")
+        severity = self.get_choice("Select severity:", [
+            "LOW",
+            "MEDIUM",
+            "HIGH"
+        ])
+        
+        return {
+            "user_id": user_id,
+            "resource_id": resource_id,
+            "action_type": action,
+            "raw_severity": severity,
+            "event_type": "digital"
+        }
     
     def create_honeypot_event(self) -> dict:
-        """Interactive creation of honeypot event"""
-        print("\n" + "="*80)
-        print("🍯 Create Honeypot Event")
-        print("="*80)
-        
-        event = {
-            "event_type": "honeypot",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # Honeypot Information
-        print("\n🎯 Honeypot Information:")
-        event["honeypot_id"] = self.get_input("Honeypot ID", "hp_plc_001")
-        
-        honeypot_type = self.get_choice("Select honeypot type:", [
-            "fake_plc",
-            "fake_access",
-            "fake_iot"
-        ])
-        event["honeypot_type"] = honeypot_type
-        
-        # Attacker Information
-        print("\n👤 Attacker Information:")
-        event["source_ip"] = self.get_input("Source IP", "192.168.1.100")
-        
-        port = self.get_input("Source Port (optional, press Enter to skip)", required=False)
-        if port:
-            event["source_port"] = int(port)
-        
-        # Interaction Details
-        print("\n⚡ Interaction Details:")
-        interaction = self.get_choice("Select interaction type:", [
-            "connection",
-            "authentication",
-            "command",
-            "data_access"
-        ])
-        event["interaction_type"] = interaction
-        
-        payload = self.get_input("Payload/Command (optional)", "MODBUS_READ_COILS", required=False)
-        if payload:
-            event["payload"] = payload
-        
-        protocol = self.get_input("Protocol (optional)", "modbus", required=False)
-        if protocol:
-            event["protocol"] = protocol
-        
-        return event
+        """Create honeypot event (deprecated - kept for compatibility)"""
+        print("\n⚠️  Honeypot events not yet implemented in database schema")
+        print("Creating a HIGH severity digital event instead...")
+        return self.create_digital_event()
+    
     
     def create_network_event(self) -> dict:
-        """Interactive creation of network event"""
-        print("\n" + "="*80)
-        print("🌐 Create Network Event")
-        print("="*80)
-        
-        event = {
-            "event_type": "network",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # Network Event Type
-        print("\n📊 Event Type:")
-        net_type = self.get_choice("Select network event type:", [
-            "suspicious_connection",
-            "port_scan",
-            "traffic_spike",
-            "unknown_device",
-            "protocol_anomaly"
-        ])
-        event["network_event_type"] = net_type
-        
-        # Network Details
-        print("\n🔌 Network Details:")
-        event["source_ip"] = self.get_input("Source IP", "10.0.0.50")
-        event["destination_ip"] = self.get_input("Destination IP", "10.0.0.100")
-        event["protocol"] = self.get_input("Protocol", "modbus")
-        
-        # Ports (optional)
-        src_port = self.get_input("Source Port (optional)", "44512", required=False)
-        if src_port:
-            event["source_port"] = int(src_port)
-        
-        dst_port = self.get_input("Destination Port (optional)", "502", required=False)
-        if dst_port:
-            event["destination_port"] = int(dst_port)
-        
-        # Traffic Information (optional)
-        print("\n📈 Traffic Information (optional, press Enter to skip):")
-        packets = self.get_input("Packet count", required=False)
-        if packets:
-            event["packet_count"] = int(packets)
-        
-        bytes_count = self.get_input("Byte count", required=False)
-        if bytes_count:
-            event["byte_count"] = int(bytes_count)
-        
-        # Anomaly Score
-        score = self.get_input("Anomaly score (0.0-1.0)", "0.85", required=False)
-        if score:
-            event["anomaly_score"] = float(score)
-        
-        description = self.get_input("Description (optional)", required=False)
-        if description:
-            event["description"] = description
-        
+        """Create network event (deprecated - kept for compatibility)"""
+        print("\n⚠️  Network events - creating as digital event...")
+        event = self.create_digital_event()
+        event['action_type'] = 'NETWORK_CONNECTION'
         return event
     
     def create_endpoint_event(self) -> dict:
-        """Interactive creation of endpoint event"""
-        print("\n" + "="*80)
-        print("💻 Create Endpoint Event")
-        print("="*80)
-        
-        event = {
-            "event_type": "endpoint",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # Endpoint Information
-        print("\n🖥️  Endpoint Information:")
-        event["hostname"] = self.get_input("Hostname", "ICS-WORKSTATION-01")
-        event["endpoint_id"] = self.get_input("Endpoint ID", "endpoint_001")
-        event["operating_system"] = self.get_input("Operating System", "Windows 10")
-        
-        # Event Type
-        print("\n📋 Event Type:")
-        ep_type = self.get_choice("Select endpoint event type:", [
-            "process_creation",
-            "network_connection",
-            "file_creation",
-            "registry_modification",
-            "privilege_escalation"
-        ])
-        event["endpoint_event_type"] = ep_type
-        
-        # Process Information (optional)
-        print("\n⚙️  Process Information (optional, press Enter to skip):")
-        process = self.get_input("Process name", "powershell.exe", required=False)
-        if process:
-            event["process_name"] = process
-        
-        pid = self.get_input("Process ID", required=False)
-        if pid:
-            event["process_id"] = int(pid)
-        
-        parent = self.get_input("Parent process", required=False)
-        if parent:
-            event["parent_process"] = parent
-        
-        cmdline = self.get_input("Command line", required=False)
-        if cmdline:
-            event["command_line"] = cmdline
-        
-        user = self.get_input("User", required=False)
-        if user:
-            event["user"] = user
-        
-        # Severity
-        print("\n🚨 Severity:")
-        severity = self.get_choice("Select severity:", [
-            "INFO",
-            "WARNING",
-            "ERROR",
-            "CRITICAL"
-        ])
-        event["severity"] = severity
-        
-        description = self.get_input("Description (optional)", required=False)
-        if description:
-            event["description"] = description
-        
+        """Create endpoint event (deprecated - kept for compatibility)"""
+        print("\n⚠️  Endpoint events - creating as digital event...")
+        event = self.create_digital_event()
         return event
     
     def create_teapot_event(self) -> dict:
-        """Interactive creation of teapot event"""
-        print("\n" + "="*80)
-        print("🫖 Create Teapot Event (Decoy Credential)")
-        print("="*80)
-        
-        event = {
-            "event_type": "teapot",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # Decoy Information
-        print("\n🎭 Decoy Information:")
-        decoy_type = self.get_choice("Select decoy type:", [
-            "fake_card",
-            "fake_fingerprint",
-            "fake_user"
-        ])
-        event["decoy_type"] = decoy_type
-        
-        event["decoy_id"] = self.get_input("Decoy ID", "FAKE_CARD_001")
-        
-        # Usage Information (optional)
-        print("\n📍 Usage Information (optional, press Enter to skip):")
-        device = self.get_input("Device ID", required=False)
-        if device:
-            event["device_id"] = device
-        
-        ip = self.get_input("Source IP", required=False)
-        if ip:
-            event["source_ip"] = ip
-        
-        location = self.get_input("Location", required=False)
-        if location:
-            event["location"] = location
-        
+        """Create teapot/decoy event (deprecated - kept for compatibility)"""
+        print("\n⚠️  Teapot events - creating as HIGH severity physical access attempt...")
+        event = self.create_access_event()
+        event['access_status'] = 'DENIED'
         return event
     
+    
     def process_event(self, event_data: dict):
-        """Process the event and show results"""
+        """Process the event and insert into database"""
         print("\n" + "="*80)
         print("🔄 Processing Event...")
         print("="*80)
@@ -352,72 +252,142 @@ class InteractiveCLI:
         import json
         print(json.dumps(event_data, indent=2))
         
-        # Process event
-        result = self.receiver.process_event(event_data)
-        
-        if not result:
-            print("\n❌ Event processing failed!")
-        
-        # Show statistics
-        print("\n📊 Receiver Statistics:")
-        stats = self.receiver.get_statistics()
-        print(f"   Total Received: {stats['total_received']}")
-        print(f"   Total Processed: {stats['total_processed']}")
-        print(f"   Total Errors: {stats['total_errors']}")
-        print(f"   Success Rate: {stats['success_rate']:.2%}")
+        try:
+            # Insert based on event type
+            event_id = None
+            
+            if event_data.get('event_type') == 'physical':
+                # Physical access log
+                event_id = self.db.log_physical_event(
+                    user_id=event_data['user_id'],
+                    resource_id=event_data['resource_id'],
+                    access_status=event_data['access_status']
+                )
+                
+                if event_id:
+                    print(f"\n✅ Physical event logged successfully!")
+                    print(f"   Event ID: {event_id}")
+                    print(f"   User: {event_data['user_id']}")
+                    print(f"   Resource: {event_data['resource_id']}")
+                    print(f"   Status: {event_data['access_status']}")
+                else:
+                    print(f"\n❌ Failed to log physical event!")
+                    print(f"   Check logs above for error details")
+                    return False
+                
+            elif event_data.get('event_type') == 'digital':
+                # Digital log
+                event_id = self.db.log_digital_event(
+                    user_id=event_data['user_id'],
+                    resource_id=event_data['resource_id'],
+                    action_type=event_data['action_type'],
+                    raw_severity=event_data['raw_severity']
+                )
+                
+                if event_id:
+                    print(f"\n✅ Digital event logged successfully!")
+                    print(f"   Event ID: {event_id}")
+                    print(f"   User: {event_data['user_id']}")
+                    print(f"   Resource: {event_data['resource_id']}")
+                    print(f"   Action: {event_data['action_type']}")
+                    print(f"   Severity: {event_data['raw_severity']}")
+                else:
+                    print(f"\n❌ Failed to log digital event!")
+                    print(f"   Check logs above for error details")
+                    return False
+            
+            else:
+                print(f"\n❌ Unknown event type: {event_data.get('event_type')}")
+                return False
+            
+            self.events_logged += 1
+            
+            # Check if triggers created threat
+            if event_data.get('event_type') == 'physical' and event_data['access_status'] == 'DENIED':
+                print("\n🚨 HIGH severity event - checking for threat detection...")
+                threats = self.db.get_threat_by_user(event_data['user_id'], status='ACTIVE')
+                if threats:
+                    print(f"   ⚠️  ACTIVE threat detected!")
+                    print(f"   Risk Score: {threats[0]['risk_score']}")
+                    print(f"   Event Count: {threats[0]['event_count']}")
+            
+            elif event_data.get('event_type') == 'digital' and event_data['raw_severity'] == 'HIGH':
+                print("\n🚨 HIGH severity event - checking for threat detection...")
+                threats = self.db.get_threat_by_user(event_data['user_id'], status='ACTIVE')
+                if threats:
+                    print(f"   ⚠️  ACTIVE threat detected!")
+                    print(f"   Risk Score: {threats[0]['risk_score']}")
+                    print(f"   Event Count: {threats[0]['event_count']}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"\n❌ Event processing failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     
     def main_menu(self):
         """Display main menu and handle user choice"""
         while True:
             print("\n" + "="*80)
-            print("🔵 GodsEye Event Receiver - Interactive CLI")
+            print("🔵 GodsEye Database Event Injection - Interactive CLI")
             print("="*80)
             print("\nSelect event type to create:")
-            print("  1. 📱 Access Event (RFID/Fingerprint)")
-            print("  2. 🍯 Honeypot Event")
-            print("  3. 🌐 Network Event")
-            print("  4. 💻 Endpoint Event (Sysmon/Wazuh)")
-            print("  5. 🫖 Teapot Event (Decoy Credential)")
-            print("  6. 📊 Show Statistics")
-            print("  7. 🔄 Reset Statistics")
-            print("  8. 🚪 Exit")
+            print("  1. 📱 Physical Access Event (RFID/Door)")
+            print("  2. 💻 Digital Event (File/Process/Login)")
+            print("  3. 🍯 Honeypot Event (creates digital)")
+            print("  4. 🌐 Network Event (creates digital)")
+            print("  5. 🖥️  Endpoint Event (creates digital)")
+            print("  6. 🫖 Teapot Event (creates physical denied)")
+            print("  7. 📊 Show Database Statistics")
+            print("  8. 👥 List Users")
+            print("  9. 🏢 List Resources")
+            print("  0. 🚪 Exit")
             
             try:
-                choice = input("\nEnter choice (1-8): ").strip()
+                choice = input("\nEnter choice (0-9): ").strip()
                 
                 if choice == "1":
                     event = self.create_access_event()
                     self.process_event(event)
                 
                 elif choice == "2":
-                    event = self.create_honeypot_event()
+                    event = self.create_digital_event()
                     self.process_event(event)
                 
                 elif choice == "3":
-                    event = self.create_network_event()
+                    event = self.create_honeypot_event()
                     self.process_event(event)
                 
                 elif choice == "4":
-                    event = self.create_endpoint_event()
+                    event = self.create_network_event()
                     self.process_event(event)
                 
                 elif choice == "5":
-                    event = self.create_teapot_event()
+                    event = self.create_endpoint_event()
                     self.process_event(event)
                 
                 elif choice == "6":
-                    self.show_statistics()
+                    event = self.create_teapot_event()
+                    self.process_event(event)
                 
                 elif choice == "7":
-                    self.receiver.reset_statistics()
-                    print("\n✅ Statistics reset successfully!")
+                    self.show_statistics()
                 
                 elif choice == "8":
+                    self.list_users()
+                
+                elif choice == "9":
+                    self.list_resources()
+                
+                elif choice == "0":
                     print("\n👋 Goodbye!")
                     break
                 
                 else:
-                    print("\n⚠️  Invalid choice. Please enter 1-8.")
+                    print("\n⚠️  Invalid choice. Please enter 0-9.")
                 
                 input("\nPress Enter to continue...")
             
@@ -426,43 +396,78 @@ class InteractiveCLI:
                 break
             except Exception as e:
                 print(f"\n❌ Error: {e}")
+                import traceback
+                traceback.print_exc()
                 input("\nPress Enter to continue...")
     
+    
     def show_statistics(self):
-        """Show detailed statistics"""
+        """Show database statistics"""
         print("\n" + "="*80)
-        print("📊 Event Receiver Statistics")
+        print("📊 GodsEye Database Statistics")
         print("="*80)
         
-        stats = self.receiver.get_statistics()
-        
-        print(f"\n📈 Overall Statistics:")
-        print(f"   Total Received:  {stats['total_received']}")
-        print(f"   Total Processed: {stats['total_processed']}")
-        print(f"   Total Errors:    {stats['total_errors']}")
-        print(f"   Success Rate:    {stats['success_rate']:.2%}")
-        
-        if stats['by_type']:
-            print(f"\n📋 Events by Type:")
-            for event_type, count in stats['by_type'].items():
-                print(f"   {event_type}: {count}")
+        try:
+            stats = self.db.get_statistics()
+            
+            print(f"\n📦 Data Overview:")
+            print(f"   Users: {stats.get('users', {}).get('total', 0)}")
+            print(f"   Resources: {stats.get('resources', {}).get('total', 0)}")
+            print(f"   Physical Events: {stats.get('events', {}).get('physical_total', 0)}")
+            print(f"   Digital Events: {stats.get('events', {}).get('digital_total', 0)}")
+            print(f"   Unified Logs: {stats.get('events', {}).get('main_total', 0)}")
+            print(f"   Active Threats: {stats.get('threats', {}).get('active', 0)}")
+            
+            print(f"\n📈 Last 24 Hours:")
+            print(f"   Physical Events: {stats.get('events', {}).get('physical_24h', 0)}")
+            print(f"   Digital Events: {stats.get('events', {}).get('digital_24h', 0)}")
+            print(f"   HIGH Severity: {stats.get('events', {}).get('high_severity_24h', 0)}")
+            
+            print(f"\n🔥 Active Threats:")
+            threats = self.db.get_threats(status='ACTIVE', limit=5)
+            if threats:
+                for threat in threats:
+                    print(f"   • {threat['user_id']}: Risk {threat['risk_score']} ({threat['event_count']} events)")
+            else:
+                print(f"   ✅ No active threats")
+            
+            print(f"\n📊 Session Statistics:")
+            print(f"   Events Logged This Session: {self.events_logged}")
+            
+        except Exception as e:
+            print(f"\n❌ Error getting statistics: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 def main():
     """Entry point"""
-    cli = InteractiveCLI()
-    
-    print("\n" + "="*80)
-    print("🔵 Welcome to GodsEye Event Receiver Interactive CLI")
-    print("="*80)
-    print("\nThis tool allows you to manually create and test events.")
-    print("You'll be prompted for each field required by the event type.")
-    print("\nPress Ctrl+C at any time to exit.")
-    print("="*80)
-    
-    input("\nPress Enter to start...")
-    
-    cli.main_menu()
+    try:
+        cli = InteractiveCLI()
+        
+        print("\n" + "="*80)
+        print("🔵 Welcome to GodsEye Database Event Injection CLI")
+        print("="*80)
+        print("\nThis tool allows you to manually create and inject events into the database.")
+        print("Events will trigger automated threat detection via PostgreSQL triggers.")
+        print("\n✅ Database: Connected")
+        print(f"✅ Users: {len(cli.users)} available")
+        print(f"✅ Resources: {len(cli.resources)} available")
+        print("\nPress Ctrl+C at any time to exit.")
+        print("="*80)
+        
+        input("\nPress Enter to start...")
+        
+        cli.main_menu()
+        
+    except Exception as e:
+        print(f"\n❌ Failed to start: {e}")
+        print("\nMake sure:")
+        print("  1. PostgreSQL is running")
+        print("  2. Database 'godseye' exists")
+        print("  3. config/db_config.yaml has correct credentials")
+        print("  4. Tables are created (run: psql -U postgres -f database/setup_postgres.sql)")
+        print("  5. Test data exists (run: python tests/seed_database.py)")
 
 
 if __name__ == "__main__":

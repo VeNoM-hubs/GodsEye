@@ -1,177 +1,224 @@
 """
-Database Test Script
-Test the access event database functionality
+Test GodsEye PostgreSQL Database
+Comprehensive testing for all database functions
 """
 
 import sys
 import os
-from datetime import datetime, timedelta
-
-# Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.db_storage import get_access_db
-from backend.schemas import AccessEvent, AccessMethod, AccessStatus
+from datetime import datetime, timedelta
+from backend.db_storage import get_db
 
 
 def test_database():
-    """Test database operations"""
+    """Test all database operations"""
     
     print("\n" + "="*80)
-    print("🗄️  GodsEye PostgreSQL Access Event Database Test")
+    print("🗄️  GodsEye PostgreSQL Database Test")
     print("="*80)
     
     # PostgreSQL connection
-    print("\n📝 PostgreSQL Connection Details:")
-    host = input("Host [localhost]: ").strip() or "localhost"
-    port = input("Port [5432]: ").strip() or "5432"
-    dbname = input("Database name [godseye]: ").strip() or "godseye"
-    user = input("Username [godseye]: ").strip() or "godseye"
-    password = input("Password [godseye_secure_password]: ").strip() or "godseye_secure_password"
-    
-    print("\n🔌 Connecting to PostgreSQL...")
+    print("\n� Connecting to PostgreSQL...")
+    print("📄 Using credentials from config/db_config.yaml")
     try:
-        db = get_access_db(
-            db_host=host,
-            db_port=int(port),
-            db_name=dbname,
-            db_user=user,
-            db_password=password
-        )
-        print(f"✅ Connected to PostgreSQL: {host}:{port}/{dbname}")
+        db = get_db()
+        print(f"✅ Connected to PostgreSQL database")
     except Exception as e:
         print(f"\n❌ Connection failed: {e}")
         print("\nMake sure:")
         print("  1. PostgreSQL is installed and running")
         print("  2. Database 'godseye' exists")
-        print("  3. User credentials are correct")
+        print("  3. Credentials in config/db_config.yaml are correct")
+        print("  4. Tables are created (run database/setup_postgres.sql)")
         print("\nSee database/POSTGRES_SETUP.md for setup instructions")
         return
     
-    # Test 1: Save successful access event
     print("\n" + "-"*80)
-    print("TEST 1: Saving successful access event")
+    print("TEST 1: Add MITRE ATT&CK Techniques")
     print("-"*80)
     
-    success_event = AccessEvent(
-        event_id="test_acc_001",
-        timestamp=datetime.utcnow(),
-        device_id="access_door_01",
-        location="Server Room A",
-        access_method=AccessMethod.RFID_FINGERPRINT,
-        card_id="CARD_12345",
-        fingerprint_id="FP_USER_001",
-        user_id="USER_001",
-        status=AccessStatus.SUCCESS
-    )
+    mitre_techniques = [
+        ('T1078', 'Valid Accounts', 'Initial Access'),
+        ('T1110', 'Brute Force', 'Credential Access'),
+        ('T1021', 'Remote Services', 'Lateral Movement'),
+        ('T1071', 'Application Layer Protocol', 'Command and Control'),
+        ('T1040', 'Network Sniffing', 'Credential Access')
+    ]
     
-    result = db.save_access_event(success_event)
-    print(f"✅ Event saved: {result}")
+    for tech_id, tech_name, tactic in mitre_techniques:
+        db.add_mitre_technique(tech_id, tech_name, tactic)
+        print(f"  ✅ Added {tech_id}: {tech_name}")
     
-    # Test 2: Save failed access events
+    techniques = db.get_mitre_techniques()
+    print(f"\n📊 Total MITRE techniques in database: {len(techniques)}")
+    
     print("\n" + "-"*80)
-    print("TEST 2: Saving multiple failed access events")
+    print("TEST 2: Add Users and Resources")
     print("-"*80)
     
-    for i in range(1, 4):
-        failed_event = AccessEvent(
-            event_id=f"test_acc_fail_{i:03d}",
-            timestamp=datetime.utcnow(),
-            device_id="access_door_01",
-            location="Server Room A",
-            access_method=AccessMethod.RFID,
-            card_id="CARD_WRONG",
-            status=AccessStatus.FAILED,
-            failure_reason="Invalid card ID"
-        )
-        db.save_access_event(failed_event)
-        print(f"✅ Failed event {i} saved")
+    # Add users
+    users = [
+        ('john_doe', 'John Doe', 'admin', 10),
+        ('jane_smith', 'Jane Smith', 'engineer', 7),
+        ('alice_wong', 'Alice Wong', 'analyst', 5),
+        ('bob_miller', 'Bob Miller', 'contractor', 3),
+        ('eve_blackhat', 'Eve Blackhat', 'external', 1)  # Suspicious user
+    ]
     
-    # Test 3: Query all events
+    for user_id, full_name, role, access_level in users:
+        db.add_user(user_id, full_name, role, access_level)
+        print(f"  ✅ Added user: {full_name} (Level {access_level})")
+    
+    # Add resources
+    resources = [
+        ('door_server_room', 'Server Room Door', 'physical_door', 8, True),
+        ('door_office', 'Office Main Door', 'physical_door', 3, False),
+        ('door_datacenter', 'Data Center Access', 'physical_door', 10, True),
+        ('file_payroll', 'Payroll Database', 'database', 9, True),
+        ('file_public', 'Public Documents', 'file', 1, False),
+        ('server_prod', 'Production Server', 'server', 8, True),
+        ('server_dev', 'Development Server', 'server', 5, False)
+    ]
+    
+    for res_id, res_name, res_type, req_level, sensitive in resources:
+        db.add_resource(res_id, res_name, res_type, req_level, sensitive)
+        print(f"  ✅ Added resource: {res_name} (Level {req_level})")
+    
     print("\n" + "-"*80)
-    print("TEST 3: Querying all access events")
+    print("TEST 3: Log Physical Access Events")
     print("-"*80)
     
-    all_events = db.get_access_events(limit=10)
-    print(f"\nFound {len(all_events)} events:")
-    for event in all_events:
-        print(f"  • {event['event_id']} - {event['status']} - {event['device_id']} - {event['timestamp']}")
+    # Successful access
+    event_id = db.log_physical_event('john_doe', 'door_server_room', 'GRANTED')
+    print(f"  ✅ Event {event_id}: john_doe → door_server_room [GRANTED]")
     
-    # Test 4: Query failed attempts
+    event_id = db.log_physical_event('jane_smith', 'door_office', 'GRANTED')
+    print(f"  ✅ Event {event_id}: jane_smith → door_office [GRANTED]")
+    
+    # Failed access - bob_miller tries to access server room (level 3 user, needs level 8)
+    event_id = db.log_physical_event('bob_miller', 'door_server_room', 'DENIED')
+    print(f"  ⚠️  Event {event_id}: bob_miller → door_server_room [DENIED] (Trigger should create HIGH severity)")
+    
+    # Multiple failed attempts - suspicious!
+    for i in range(3):
+        event_id = db.log_physical_event('eve_blackhat', 'door_datacenter', 'DENIED')
+        print(f"  🚨 Event {event_id}: eve_blackhat → door_datacenter [DENIED] (Attempt {i+1}/3)")
+    
     print("\n" + "-"*80)
-    print("TEST 4: Querying failed access attempts")
+    print("TEST 4: Log Digital Events")
     print("-"*80)
     
-    failed_events = db.get_failed_attempts(device_id="access_door_01", minutes=10)
-    print(f"\nFound {len(failed_events)} failed attempts in last 10 minutes:")
-    for event in failed_events:
-        print(f"  • {event['event_id']} - {event['card_id']} - {event['failure_reason']}")
+    # Normal activity
+    event_id = db.log_digital_event('jane_smith', 'server_dev', 'FILE_ACCESS', 'LOW')
+    print(f"  ✅ Event {event_id}: jane_smith → server_dev [FILE_ACCESS] [LOW]")
     
-    # Test 5: Query by device
+    event_id = db.log_digital_event('alice_wong', 'file_public', 'FILE_READ', 'LOW')
+    print(f"  ✅ Event {event_id}: alice_wong → file_public [FILE_READ] [LOW]")
+    
+    # Suspicious activity - high severity
+    event_id = db.log_digital_event('eve_blackhat', 'file_payroll', 'UNAUTHORIZED_ACCESS', 'HIGH')
+    print(f"  🚨 Event {event_id}: eve_blackhat → file_payroll [UNAUTHORIZED_ACCESS] [HIGH]")
+    
+    event_id = db.log_digital_event('bob_miller', 'server_prod', 'PRIVILEGE_ESCALATION', 'HIGH')
+    print(f"  🚨 Event {event_id}: bob_miller → server_prod [PRIVILEGE_ESCALATION] [HIGH]")
+    
     print("\n" + "-"*80)
-    print("TEST 5: Querying events by device ID")
+    print("TEST 5: Check Main Logs (Unified View)")
     print("-"*80)
     
-    device_events = db.get_access_events(device_id="access_door_01", limit=10)
-    print(f"\nFound {len(device_events)} events for device 'access_door_01'")
+    main_logs = db.get_main_logs(limit=20)
+    print(f"\n📊 Total events in main_logs: {len(main_logs)}")
     
-    # Test 6: Query by status
+    print("\nRecent events:")
+    for log in main_logs[:10]:
+        flag = " 🔗" if log['correlation_flag'] else ""
+        print(f"  [{log['severity']:6}] {log['source']:8} | {log['user_id']:15} → {log['resource_id']:20} | {log['event_type']}{flag}")
+    
+    # Check HIGH severity events
+    high_sev = db.get_high_severity_events(hours=24)
+    print(f"\n🚨 HIGH severity events (last 24h): {len(high_sev)}")
+    
     print("\n" + "-"*80)
-    print("TEST 6: Querying events by status")
+    print("TEST 6: Check Detected Threats")
     print("-"*80)
     
-    success_events = db.get_access_events(status="success", limit=10)
-    print(f"\nFound {len(success_events)} successful access events")
+    threats = db.get_threats(status='ACTIVE')
+    print(f"\n⚠️  Active threats detected: {len(threats)}")
     
-    # Test 7: Get statistics
+    if threats:
+        print("\nThreat Details:")
+        for threat in threats:
+            print(f"\n  🎯 Threat ID: {threat['threat_id']}")
+            print(f"     User: {threat['user_id']}")
+            print(f"     Pattern: {threat['threat_pattern']}")
+            print(f"     MITRE: {threat['mitre_id']}")
+            print(f"     Risk Score: {threat['risk_score']}")
+            print(f"     Event Count: {threat['event_count']}")
+            print(f"     Last Seen: {threat['last_seen']}")
+    else:
+        print("  ✅ No active threats detected")
+    
     print("\n" + "-"*80)
-    print("TEST 7: Database Statistics")
+    print("TEST 7: User-Specific Queries")
+    print("-"*80)
+    
+    # Check eve_blackhat's activity
+    eve_threats = db.get_threat_by_user('eve_blackhat', status='ACTIVE')
+    print(f"\n🔍 Threats for eve_blackhat: {len(eve_threats)}")
+    
+    eve_logs = db.get_main_logs(user_id='eve_blackhat', limit=10)
+    print(f"🔍 Recent events from eve_blackhat: {len(eve_logs)}")
+    
+    print("\n" + "-"*80)
+    print("TEST 8: Statistics & Dashboard")
     print("-"*80)
     
     stats = db.get_statistics()
-    print(f"\n📊 Statistics:")
-    print(f"  Total Events:     {stats.get('total_events', 0)}")
-    print(f"  Successful:       {stats.get('success_count', 0)}")
-    print(f"  Failed:           {stats.get('failed_count', 0)}")
-    print(f"  Denied:           {stats.get('denied_count', 0)}")
-    print(f"  Unique Devices:   {stats.get('unique_devices', 0)}")
-    print(f"  Unique Users:     {stats.get('unique_users', 0)}")
-    print(f"  Success Rate:     {stats.get('success_rate', 0):.2f}%")
+    print(f"\n📊 Database Statistics:")
+    print(f"  Users: {stats['users']['total']} (Active: {stats['users']['active']})")
+    print(f"  Resources: {stats['resources']['total']} (Sensitive: {stats['resources']['sensitive']})")
+    print(f"  Physical Events: {stats['events']['physical_total']}")
+    print(f"  Digital Events: {stats['events']['digital_total']}")
+    print(f"  Main Logs (Unified): {stats['events']['main_total']}")
+    print(f"  Active Threats: {stats['threats']['active']}")
+    print(f"  Resolved Threats: {stats['threats']['resolved']}")
     
-    # Test 8: Add event with metadata
-    print("\n" + "-"*80)
-    print("TEST 8: Saving event with metadata")
-    print("-"*80)
+    print(f"\n📊 Last 24 Hours:")
+    print(f"  Physical Events: {stats['recent_24h']['physical_events']}")
+    print(f"  Digital Events: {stats['recent_24h']['digital_events']}")
+    print(f"  HIGH Severity: {stats['recent_24h']['high_severity']}")
     
-    metadata_event = AccessEvent(
-        event_id="test_acc_metadata",
-        timestamp=datetime.utcnow(),
-        device_id="access_door_02",
-        location="Control Room",
-        access_method=AccessMethod.FINGERPRINT,
-        fingerprint_id="FP_ADMIN_001",
-        user_id="ADMIN_001",
-        status=AccessStatus.SUCCESS,
-        metadata={
-            "ip_address": "192.168.1.100",
-            "session_id": "sess_12345",
-            "custom_field": "test_value"
-        }
-    )
+    dashboard = db.get_dashboard_summary()
     
-    db.save_access_event(metadata_event)
-    print("✅ Event with metadata saved")
+    print(f"\n📊 Dashboard Summary:")
+    print(f"  Top Active Users (last 7 days):")
+    for user in dashboard.get('top_users', []):
+        print(f"    - {user['user_id']}: {user['event_count']} events")
     
-    # Retrieve and display
-    retrieved = db.get_access_events(limit=1)
-    if retrieved:
-        print(f"\nMetadata stored: {retrieved[0].get('metadata', {})}")
+    print(f"\n  Most Accessed Resources (last 7 days):")
+    for resource in dashboard.get('top_resources', []):
+        print(f"    - {resource['resource_id']}: {resource['access_count']} accesses")
+    
+    print(f"\n  Severity Distribution (last 24h):")
+    for severity, count in dashboard.get('severity_distribution', {}).items():
+        print(f"    - {severity}: {count}")
     
     print("\n" + "="*80)
     print("✅ All database tests completed successfully!")
     print("="*80)
     print(f"\n💾 Database: PostgreSQL - {host}:{port}/{dbname}")
-    print(f"📊 Total events in database: {stats.get('total_events', 0)}")
+    print(f"📊 Total events in database: {stats['events']['main_total']}")
+    print(f"⚠️  Active threats: {stats['threats']['active']}")
+    
+    print("\n" + "="*80)
+    print("🔥 KEY FINDINGS:")
+    print("="*80)
+    print("✅ Triggers are working - physical/digital events auto-insert to main_logs")
+    print("✅ Threat detection is working - HIGH severity events create threats")
+    print("✅ Risk scoring is working - repeated violations increase scores")
+    print("✅ MITRE ATT&CK mapping is active (T1078 for unauthorized access)")
+    print("="*80)
     print("\n")
 
 

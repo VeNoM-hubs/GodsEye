@@ -47,6 +47,7 @@ Thumbs.db
 # Project Specific
 config/secrets.yaml
 config/local_*.yaml
+config/db_config.yaml
 *.db
 *.sqlite3
 

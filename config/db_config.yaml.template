@@ -1,0 +1,16 @@
+# PostgreSQL Database Configuration Template
+# Copy this file to db_config.yaml and fill in your credentials
+# DO NOT commit db_config.yaml to version control!
+
+database:
+  host: localhost
+  port: 5432
+  name: godseye
+  username: postgres
+  password: "YOUR_PASSWORD_HERE"
+  
+  # Connection pool settings (optional)
+  pool_size: 5
+  max_overflow: 10
+  pool_timeout: 30
+  pool_recycle: 3600
