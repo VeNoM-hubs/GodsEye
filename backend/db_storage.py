@@ -182,6 +182,28 @@ class HoneypotLog(Base):
         }
 
 
+class HoneypotCommandLog(Base):
+    """Simple honeypot command logs matching ESP32 IP/Port/Command payload"""
+    __tablename__ = 'honeypot_command_logs'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    attacker_ip = Column(String(50), nullable=False)
+    target_port = Column(Integer, nullable=False)
+    command_text = Column(Text)
+    event_time = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'attacker_ip': self.attacker_ip,
+            'target_port': self.target_port,
+            'command_text': self.command_text,
+            'event_time': self.event_time.isoformat() if self.event_time else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
 class MainLog(Base):
     """Unified main logs - aggregates physical and digital"""
     __tablename__ = 'main_logs'
@@ -321,7 +343,6 @@ class GodsEyeDatabase:
             'resources',
             'physical_logs',
             'digital_logs',
-            'honeypot_logs',
             'honeypot_command_logs',
             'main_logs',
             'mitre_techniques',
@@ -331,7 +352,6 @@ class GodsEyeDatabase:
             'trg_physical_to_main',
             'trg_digital_to_main',
             'trg_main_to_threat',
-            'trg_honeypot_to_threat',
             'trg_hcmd_normalize'
         }
 

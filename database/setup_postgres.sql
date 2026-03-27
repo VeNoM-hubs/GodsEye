@@ -51,41 +51,6 @@ CREATE TABLE IF NOT EXISTS digital_logs (
 );
 
 -- ================================
--- HONEYPOT LOGS
--- ================================
-CREATE TABLE IF NOT EXISTS honeypot_logs (
-    id BIGSERIAL PRIMARY KEY,
-    honeypot_id VARCHAR(100) NOT NULL,
-    honeypot_name VARCHAR(100) NOT NULL,
-    honeypot_type VARCHAR(50) NOT NULL,
-    attacker_ip VARCHAR(50) NOT NULL,
-    attacker_port INT NOT NULL,
-    target_port INT NOT NULL,
-    username_attempted VARCHAR(200),
-    password_attempted VARCHAR(200),
-    commands_executed TEXT[],
-    auth_success BOOLEAN DEFAULT FALSE,
-    session_duration_ms INT DEFAULT 0,
-    threat_level VARCHAR(20) DEFAULT 'MEDIUM',
-    event_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'chk_honeypot_threat_level'
-    ) THEN
-        ALTER TABLE honeypot_logs
-        ADD CONSTRAINT chk_honeypot_threat_level
-        CHECK (threat_level IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'));
-    END IF;
-END;
-$$;
-
--- ================================
 -- SIMPLE HONEYPOT COMMAND LOGS
 -- ================================
 CREATE TABLE IF NOT EXISTS honeypot_command_logs (
@@ -150,10 +115,6 @@ CREATE INDEX IF NOT EXISTS idx_main_severity ON main_logs(severity);
 CREATE INDEX IF NOT EXISTS idx_threat_user ON threats(user_id);
 CREATE INDEX IF NOT EXISTS idx_physical_user ON physical_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_digital_user ON digital_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_honeypot_event_time ON honeypot_logs(event_time);
-CREATE INDEX IF NOT EXISTS idx_honeypot_attacker_ip ON honeypot_logs(attacker_ip);
-CREATE INDEX IF NOT EXISTS idx_honeypot_target_port ON honeypot_logs(target_port);
-CREATE INDEX IF NOT EXISTS idx_honeypot_threat_level ON honeypot_logs(threat_level);
 CREATE INDEX IF NOT EXISTS idx_hcmd_event_time ON honeypot_command_logs(event_time);
 CREATE INDEX IF NOT EXISTS idx_hcmd_attacker_ip ON honeypot_command_logs(attacker_ip);
 CREATE INDEX IF NOT EXISTS idx_hcmd_target_port ON honeypot_command_logs(target_port);
@@ -309,87 +270,6 @@ FOR EACH ROW
 EXECUTE FUNCTION detect_threat();
 
 -- ================================================
--- TRIGGER: HONEYPOT → THREAT (Auto-escalation)
--- ================================================
-CREATE OR REPLACE FUNCTION escalate_honeypot_hit()
-RETURNS TRIGGER AS $$
-DECLARE
-    threat_user_id VARCHAR(50);
-    existing_id BIGINT;
-    computed_risk INT;
-    computed_pattern VARCHAR(120);
-BEGIN
-    threat_user_id := 'HPOT_' || LEFT(REGEXP_REPLACE(NEW.honeypot_id, '[^A-Za-z0-9_]', '', 'g'), 45);
-
-    INSERT INTO users (
-        user_id,
-        full_name,
-        role,
-        access_level,
-        is_active
-    )
-    VALUES (
-        threat_user_id,
-        'Honeypot Sensor ' || LEFT(NEW.honeypot_id, 30),
-        'SYSTEM',
-        10,
-        TRUE
-    )
-    ON CONFLICT (user_id) DO NOTHING;
-
-    computed_risk := CASE
-        WHEN NEW.threat_level = 'CRITICAL' THEN 95
-        WHEN NEW.threat_level = 'HIGH' THEN 80
-        WHEN NEW.threat_level = 'MEDIUM' THEN 60
-        ELSE 50
-    END;
-
-    computed_pattern := LEFT(
-        'Honeypot Interaction - ' || NEW.honeypot_type || ' on port ' || NEW.target_port ||
-        ' from ' || NEW.attacker_ip,
-        120
-    );
-
-    SELECT threat_id INTO existing_id
-    FROM threats
-    WHERE user_id = threat_user_id
-      AND threat_pattern = computed_pattern
-      AND status = 'ACTIVE'
-      AND last_seen > NOW() - INTERVAL '10 minutes'
-    LIMIT 1;
-
-    IF existing_id IS NOT NULL THEN
-        UPDATE threats
-        SET event_count = event_count + 1,
-            risk_score = LEAST(100, GREATEST(risk_score, computed_risk) + 5),
-            last_seen = NEW.event_time
-        WHERE threat_id = existing_id;
-    ELSE
-        INSERT INTO threats (
-            user_id,
-            threat_pattern,
-            mitre_id,
-            risk_score,
-            first_seen,
-            last_seen,
-            status
-        )
-        VALUES (
-            threat_user_id,
-            computed_pattern,
-            'T1595',
-            computed_risk,
-            NEW.event_time,
-            NEW.event_time,
-            'ACTIVE'
-        );
-    END IF;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- ================================================
 -- TRIGGER: HONEYPOT COMMAND NORMALIZER
 -- ================================================
 CREATE OR REPLACE FUNCTION normalize_honeypot_command()
@@ -406,13 +286,6 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_honeypot_to_threat ON honeypot_logs;
-
-CREATE TRIGGER trg_honeypot_to_threat
-AFTER INSERT ON honeypot_logs
-FOR EACH ROW
-EXECUTE FUNCTION escalate_honeypot_hit();
 
 DROP TRIGGER IF EXISTS trg_hcmd_normalize ON honeypot_command_logs;
 
