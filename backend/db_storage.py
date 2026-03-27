@@ -9,7 +9,7 @@ import yaml
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, BigInteger, ForeignKey, text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, BigInteger, ForeignKey, text, ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 
@@ -142,6 +142,46 @@ class DigitalLog(Base):
         }
 
 
+class HoneypotLog(Base):
+    """Honeypot logs - captures attacker interactions"""
+    __tablename__ = 'honeypot_logs'
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    honeypot_id = Column(String(100), nullable=False)
+    honeypot_name = Column(String(100), nullable=False)
+    honeypot_type = Column(String(50), nullable=False)
+    attacker_ip = Column(String(50), nullable=False)
+    attacker_port = Column(Integer, nullable=False)
+    target_port = Column(Integer, nullable=False)
+    username_attempted = Column(String(200))
+    password_attempted = Column(String(200))
+    commands_executed = Column(ARRAY(String))  # PostgreSQL array type
+    auth_success = Column(Boolean, default=False)
+    session_duration_ms = Column(Integer, default=0)
+    threat_level = Column(String(20), default='MEDIUM')  # LOW, MEDIUM, HIGH, CRITICAL
+    event_time = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'honeypot_id': self.honeypot_id,
+            'honeypot_name': self.honeypot_name,
+            'honeypot_type': self.honeypot_type,
+            'attacker_ip': self.attacker_ip,
+            'attacker_port': self.attacker_port,
+            'target_port': self.target_port,
+            'username_attempted': self.username_attempted,
+            'password_attempted': self.password_attempted,
+            'commands_executed': self.commands_executed,
+            'auth_success': self.auth_success,
+            'session_duration_ms': self.session_duration_ms,
+            'threat_level': self.threat_level,
+            'event_time': self.event_time.isoformat() if self.event_time else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
 class MainLog(Base):
     """Unified main logs - aggregates physical and digital"""
     __tablename__ = 'main_logs'
@@ -268,8 +308,89 @@ class GodsEyeDatabase:
         
         # Create session factory
         self.SessionLocal = sessionmaker(bind=self.engine)
+
+        # Ensure schema/tables/triggers exist (idempotent)
+        self._ensure_schema_ready()
         
         logger.info(f"GodsEye PostgreSQL Database initialized successfully")
+
+    def _schema_health_check(self) -> bool:
+        """Return True if required tables and triggers already exist."""
+        required_tables = {
+            'users',
+            'resources',
+            'physical_logs',
+            'digital_logs',
+            'honeypot_logs',
+            'honeypot_command_logs',
+            'main_logs',
+            'mitre_techniques',
+            'threats'
+        }
+        required_triggers = {
+            'trg_physical_to_main',
+            'trg_digital_to_main',
+            'trg_main_to_threat',
+            'trg_honeypot_to_threat',
+            'trg_hcmd_normalize'
+        }
+
+        session = self.get_session()
+        try:
+            table_rows = session.execute(text("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+            """)).fetchall()
+            existing_tables = {row[0] for row in table_rows}
+
+            trigger_rows = session.execute(text("""
+                SELECT tgname
+                FROM pg_trigger
+                WHERE NOT tgisinternal
+            """)).fetchall()
+            existing_triggers = {row[0] for row in trigger_rows}
+
+            return required_tables.issubset(existing_tables) and required_triggers.issubset(existing_triggers)
+        finally:
+            session.close()
+
+    def _run_setup_sql(self) -> None:
+        """Execute database/setup_postgres.sql against current connection."""
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        setup_sql_path = os.path.join(os.path.dirname(current_dir), 'database', 'setup_postgres.sql')
+
+        if not os.path.exists(setup_sql_path):
+            raise FileNotFoundError(f"setup_postgres.sql not found at: {setup_sql_path}")
+
+        with open(setup_sql_path, 'r', encoding='utf-8') as sql_file:
+            setup_sql = sql_file.read()
+
+        raw_conn = self.engine.raw_connection()
+        try:
+            cursor = raw_conn.cursor()
+            cursor.execute(setup_sql)
+            raw_conn.commit()
+            cursor.close()
+        except Exception:
+            raw_conn.rollback()
+            raise
+        finally:
+            raw_conn.close()
+
+    def _ensure_schema_ready(self) -> None:
+        """Create missing tables/triggers by running setup SQL if needed."""
+        try:
+            if self._schema_health_check():
+                logger.info("Database schema/triggers already present; setup skipped")
+                return
+
+            logger.info("Database schema/triggers missing; running setup_postgres.sql")
+            self._run_setup_sql()
+            logger.info("Database setup_postgres.sql executed successfully")
+        except Exception as e:
+            logger.error(f"Failed to ensure database schema: {e}")
+            raise
     
     def get_session(self) -> Session:
         """Get a new database session"""

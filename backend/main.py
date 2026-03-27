@@ -3,8 +3,15 @@ Main Backend Application
 Integrates all components and provides event processing pipeline
 """
 
+import os
+import sys
 import logging
 from datetime import datetime
+import uvicorn
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from backend.event_receiver import get_event_receiver
 from backend.anomaly_detection import get_anomaly_detector
@@ -19,6 +26,8 @@ from backend.schemas import (
     TeapotEvent,
     EventType
 )
+from backend.api_server import create_app
+from backend.db_storage import GodsEyeDatabase
 
 # Setup logging
 logging.basicConfig(
@@ -182,6 +191,11 @@ def get_backend() -> GodsEyeBackend:
 
 
 if __name__ == "__main__":
+    # Force DB bootstrap (tables/functions/triggers) on startup
+    logger.info("Ensuring PostgreSQL schema/triggers are ready...")
+    _startup_db = GodsEyeDatabase()
+    logger.info("PostgreSQL schema/triggers ready")
+
     # Initialize backend
     backend = get_backend()
     
@@ -192,3 +206,15 @@ if __name__ == "__main__":
     print("="*80)
     print(f"System ready at: {status['timestamp']}")
     print("="*80 + "\n")
+
+    app = create_app()
+    logger.info("🚀 Starting GodsEye API via backend.main")
+    logger.info("📍 Listening on http://0.0.0.0:8000")
+    logger.info("📖 Swagger UI: http://0.0.0.0:8000/docs")
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )
