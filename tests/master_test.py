@@ -23,7 +23,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from backend.db_storage import GodsEyeDatabase, HoneypotLog, User, Resource, Threat
+from backend.db_storage import GodsEyeDatabase, HoneypotCommandLog, User, Resource, Threat
 from sqlalchemy import text
 
 # Setup logging
@@ -90,7 +90,7 @@ class GodsEyeTestSuite:
             print("\n  1. Test Connection")
             print("  2. Verify Tables")
             print("  3. Check Table Row Counts")
-            print("  4. Inspect honeypot_logs Schema")
+            print("  4. Inspect honeypot_command_logs Schema")
             print("  5. Back to Main Menu")
             choice = input("\nSelect option (1-5): ").strip()
             
@@ -132,7 +132,7 @@ class GodsEyeTestSuite:
             
             required_tables = [
                 'users', 'resources', 'physical_logs', 'digital_logs',
-                'honeypot_logs', 'main_logs', 'mitre_techniques', 'threats'
+                'honeypot_command_logs', 'main_logs', 'mitre_techniques', 'threats'
             ]
             
             query = """
@@ -166,7 +166,7 @@ class GodsEyeTestSuite:
             
             tables = [
                 'users', 'resources', 'physical_logs', 'digital_logs',
-                'honeypot_logs', 'main_logs', 'mitre_techniques', 'threats'
+                'honeypot_command_logs', 'main_logs', 'mitre_techniques', 'threats'
             ]
             
             print(f"\n{Colors.OKCYAN}Table Statistics:{Colors.ENDC}")
@@ -180,21 +180,21 @@ class GodsEyeTestSuite:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
     
     def _inspect_honeypot_schema(self):
-        """Show honeypot_logs table schema"""
+        """Show honeypot_command_logs table schema"""
         try:
-            print("\n⏳ Inspecting honeypot_logs schema...")
+            print("\n⏳ Inspecting honeypot_command_logs schema...")
             session = self.db.get_session()
             
             query = """
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_name = 'honeypot_logs'
+                WHERE table_name = 'honeypot_command_logs'
                 ORDER BY ordinal_position
             """
             result = session.execute(text(query)).fetchall()
             session.close()
             
-            print(f"\n{Colors.OKCYAN}honeypot_logs columns:{Colors.ENDC}")
+            print(f"\n{Colors.OKCYAN}honeypot_command_logs columns:{Colors.ENDC}")
             print(f"{'Column':<25} {'Type':<20} {'Nullable':<10}")
             print("-" * 55)
             for col, dtype, nullable in result:
@@ -317,18 +317,9 @@ class GodsEyeTestSuite:
             print("\n⏳ Testing POST /honeypot/log...")
             
             payload = {
-                "honeypot_id": "ESP32-TESTDEVICE",
-                "honeypot_name": "Telnet Server",
-                "honeypot_type": "multi-service",
-                "attacker_ip": "192.168.1.50",
-                "attacker_port": 12345,
-                "target_port": 23,
-                "username_attempted": "admin",
-                "password_attempted": "password123",
-                "commands_executed": ["ls", "whoami", "id"],
-                "auth_success": False,
-                "session_duration_ms": 5000,
-                "threat_level": "HIGH"
+                "ip": "192.168.1.50",
+                "port": 23,
+                "command": "whoami"
             }
             
             print(f"\nPayload: {json.dumps(payload, indent=2)}")
@@ -338,14 +329,24 @@ class GodsEyeTestSuite:
                 json=payload,
                 timeout=5
             )
-            data = response.json()
+            try:
+                data = response.json()
+            except Exception:
+                data = {"raw": response.text}
             
             if response.status_code == 200 and data.get('success'):
                 print(f"\n{Colors.OKGREEN}✅ Event posted successfully!{Colors.ENDC}")
-                print(f"   Log ID: {data.get('honeypot_log_id')}")
+                print(f"   Log ID: {data.get('honeypot_command_log_id')}")
                 print(f"   Message: {data.get('message')}")
             else:
-                print(f"{Colors.FAIL}❌ Failed: {data.get('error', 'Unknown error')}{Colors.ENDC}")
+                error_text = (
+                    data.get('error')
+                    or data.get('detail')
+                    or data.get('message')
+                    or data.get('raw')
+                    or f"HTTP {response.status_code}"
+                )
+                print(f"{Colors.FAIL}❌ Failed (HTTP {response.status_code}): {error_text}{Colors.ENDC}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -368,8 +369,8 @@ class GodsEyeTestSuite:
             logs = data.get('logs', [])
             if logs:
                 for log in logs[:3]:  # Show first 3
-                    print(f"[{log.get('id')}] {log.get('attacker_ip')}:{log.get('attacker_port')} "
-                          f"→ Port {log.get('target_port')} | {log.get('threat_level')}")
+                    cmd = log.get('command_text') or '(no data)'
+                    print(f"[{log.get('id')}] {log.get('attacker_ip')} → Port {log.get('target_port')} | CMD: {cmd}")
                 if len(logs) > 3:
                     print(f"... and {len(logs) - 3} more")
             else:
@@ -391,9 +392,9 @@ class GodsEyeTestSuite:
             
             print(f"\n{Colors.OKGREEN}✅ Honeypot Statistics:{Colors.ENDC}")
             print(f"  Total Events:      {data.get('total_events')}")
-            print(f"  High Threat Count: {data.get('high_threat_count')}")
             print(f"  Unique Attackers:  {data.get('unique_attackers')}")
             print(f"  Ports Exploited:   {data.get('ports_exploited')}")
+            print(f"  Empty Commands:    {data.get('empty_command_count')}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -404,25 +405,14 @@ class GodsEyeTestSuite:
             print("\n📝 Create Custom Honeypot Event")
             print("-" * 50)
             
-            honeypot_id = input("Honeypot ID (ESP32-XXXXX): ").strip() or "ESP32-CUSTOM"
             attacker_ip = input("Attacker IP (e.g., 192.168.1.5): ").strip() or "192.168.1.5"
             target_port = input("Target Port (23 for Telnet): ").strip() or "23"
-            command = input("Command/Username: ").strip() or "admin"
-            threat_level = input("Threat Level (LOW/MEDIUM/HIGH/CRITICAL): ").strip() or "MEDIUM"
+            command = input("Command: ").strip() or "whoami"
             
             payload = {
-                "honeypot_id": honeypot_id,
-                "honeypot_name": "Telnet Server",
-                "honeypot_type": "multi-service",
-                "attacker_ip": attacker_ip,
-                "attacker_port": 12345,
-                "target_port": int(target_port),
-                "username_attempted": command,
-                "password_attempted": "attempted",
-                "commands_executed": [command],
-                "auth_success": False,
-                "session_duration_ms": 3000,
-                "threat_level": threat_level
+                "ip": attacker_ip,
+                "port": int(target_port),
+                "command": command
             }
             
             response = requests.post(
@@ -430,12 +420,22 @@ class GodsEyeTestSuite:
                 json=payload,
                 timeout=5
             )
-            data = response.json()
+            try:
+                data = response.json()
+            except Exception:
+                data = {"raw": response.text}
             
             if data.get('success'):
-                print(f"\n{Colors.OKGREEN}✅ Event stored! ID: {data.get('honeypot_log_id')}{Colors.ENDC}")
+                print(f"\n{Colors.OKGREEN}✅ Event stored! ID: {data.get('honeypot_command_log_id')}{Colors.ENDC}")
             else:
-                print(f"{Colors.FAIL}❌ Failed: {data.get('error')}{Colors.ENDC}")
+                error_text = (
+                    data.get('error')
+                    or data.get('detail')
+                    or data.get('message')
+                    or data.get('raw')
+                    or f"HTTP {response.status_code}"
+                )
+                print(f"{Colors.FAIL}❌ Failed (HTTP {response.status_code}): {error_text}{Colors.ENDC}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -475,19 +475,10 @@ class GodsEyeTestSuite:
             print("\n⏳ Injecting honeypot event...")
             session = self.db.get_session()
             
-            log = HoneypotLog(
-                honeypot_id="ESP32-DB-TEST",
-                honeypot_name="Telnet Server",
-                honeypot_type="multi-service",
+            log = HoneypotCommandLog(
                 attacker_ip="10.0.0.1",
-                attacker_port=54321,
                 target_port=23,
-                username_attempted="testuser",
-                password_attempted="testpass",
-                commands_executed=["whoami", "ls", "cat /etc/passwd"],
-                auth_success=False,
-                session_duration_ms=6000,
-                threat_level="HIGH"
+                command_text="whoami"
             )
             
             session.add(log)
@@ -496,8 +487,8 @@ class GodsEyeTestSuite:
             session.close()
             
             print(f"{Colors.OKGREEN}✅ Event injected! ID: {log_id}{Colors.ENDC}")
-            print(f"   Attacker: 10.0.0.1:54321 → Port 23")
-            print(f"   Threat Level: HIGH")
+            print(f"   Attacker: 10.0.0.1 → Port 23")
+            print(f"   Command: whoami")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -585,7 +576,7 @@ class GodsEyeTestSuite:
             print("\n⏳ Retrieving recent events...")
             session = self.db.get_session()
             
-            honeypot_count = session.query(HoneypotLog).count()
+            honeypot_count = session.query(HoneypotCommandLog).count()
             physical_count = session.query(text("SELECT COUNT(*) FROM physical_logs")).scalar()
             digital_count = session.query(text("SELECT COUNT(*) FROM digital_logs")).scalar()
             
@@ -595,12 +586,11 @@ class GodsEyeTestSuite:
             print(f"  Digital Events:   {digital_count}")
             
             # Show recent honeypot events
-            recent = session.query(HoneypotLog).order_by(HoneypotLog.id.desc()).limit(5).all()
+            recent = session.query(HoneypotCommandLog).order_by(HoneypotCommandLog.id.desc()).limit(5).all()
             if recent:
                 print(f"\n{Colors.OKCYAN}Recent Honeypot Events:{Colors.ENDC}")
                 for log in recent:
-                    print(f"  [{log.id}] {log.attacker_ip}:{log.attacker_port} → "
-                          f"Port {log.target_port} | {log.threat_level}")
+                    print(f"  [{log.id}] {log.attacker_ip} → Port {log.target_port} | CMD: {log.command_text or '(no data)'}")
             
             session.close()
         
@@ -665,27 +655,25 @@ class GodsEyeTestSuite:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
     
     def _check_escalation(self):
-        """Check if HIGH severity events triggered threat creation"""
+        """Check current threat table status"""
         try:
             print("\n⏳ Checking threat escalation...")
             session = self.db.get_session()
             
-            # Check for threats from honeypot hits
-            honeypot_threats = session.query(Threat)\
-                                      .filter(Threat.user_id.like('HONEYPOT_%'))\
-                                      .all()
+            active_threats = session.query(Threat).filter(Threat.status == 'ACTIVE').all()
             
             session.close()
             
             print(f"\n{Colors.OKCYAN}Threat Escalation Status:{Colors.ENDC}")
-            print(f"  Honeypot-triggered threats: {len(honeypot_threats)}")
+            print(f"  Active threats in table: {len(active_threats)}")
+            print(f"  Note: simple honeypot schema does not auto-create threats")
             
-            if honeypot_threats:
+            if active_threats:
                 print(f"\n{Colors.OKGREEN}✅ Auto-escalation working!{Colors.ENDC}")
-                for t in honeypot_threats[:3]:
+                for t in active_threats[:3]:
                     print(f"  - {t.threat_pattern} (Risk: {t.risk_score})")
             else:
-                print(f"{Colors.WARNING}ℹ️  No honeypot threats yet (inject events first){Colors.ENDC}")
+                print(f"{Colors.WARNING}ℹ️  No active threats found{Colors.ENDC}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -761,9 +749,9 @@ class GodsEyeTestSuite:
         
         while True:
             print("\n  1. Get All Honeypot Logs")
-            print("  2. Filter by Threat Level")
+            print("  2. Filter by Port")
             print("  3. Filter by Attacker IP")
-            print("  4. Get Logs by Honeypot ID")
+            print("  4. Filter by Command Text")
             print("  5. Top Attacked Ports")
             print("  6. Top Attacker IPs")
             print("  7. Back to Main Menu")
@@ -772,11 +760,11 @@ class GodsEyeTestSuite:
             if choice == "1":
                 self._get_all_logs()
             elif choice == "2":
-                self._filter_by_threat()
+                self._filter_by_port()
             elif choice == "3":
                 self._filter_by_attacker()
             elif choice == "4":
-                self._filter_by_honeypot()
+                self._filter_by_command()
             elif choice == "5":
                 self._top_ports()
             elif choice == "6":
@@ -792,8 +780,8 @@ class GodsEyeTestSuite:
             print("\n⏳ Retrieving honeypot logs...")
             session = self.db.get_session()
             
-            logs = session.query(HoneypotLog)\
-                         .order_by(HoneypotLog.event_time.desc())\
+            logs = session.query(HoneypotCommandLog)\
+                         .order_by(HoneypotCommandLog.event_time.desc())\
                          .limit(20)\
                          .all()
             
@@ -804,42 +792,40 @@ class GodsEyeTestSuite:
                 return
             
             print(f"\n{Colors.OKCYAN}Honeypot Logs (Latest 20):{Colors.ENDC}")
-            print(f"{'ID':<5} {'Attacker':<20} {'Port':<6} {'Threat':<8} {'Time':<19}")
+            print(f"{'ID':<5} {'Attacker':<20} {'Port':<6} {'Command':<20} {'Time':<19}")
             print("-" * 60)
             for log in logs:
                 time_str = log.event_time.strftime("%Y-%m-%d %H:%M:%S") if log.event_time else "N/A"
                 print(f"{log.id:<5} {log.attacker_ip:<20} {log.target_port:<6} "
-                      f"{log.threat_level:<8} {time_str:<19}")
+                      f"{(log.command_text or '(no data)')[:20]:<20} {time_str:<19}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
     
-    def _filter_by_threat(self):
-        """Filter logs by threat level"""
+    def _filter_by_port(self):
+        """Filter logs by target port"""
         try:
-            threat_level = input("Threat Level (LOW/MEDIUM/HIGH/CRITICAL): ").strip().upper()
-            
-            if threat_level not in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']:
-                print(f"{Colors.FAIL}Invalid threat level{Colors.ENDC}")
+            port_input = input("Target Port: ").strip()
+            if not port_input.isdigit():
+                print(f"{Colors.FAIL}Invalid port{Colors.ENDC}")
                 return
+            target_port = int(port_input)
             
-            print(f"\n⏳ Filtering by {threat_level}...")
+            print(f"\n⏳ Filtering by port {target_port}...")
             session = self.db.get_session()
             
-            logs = session.query(HoneypotLog)\
-                         .filter(HoneypotLog.threat_level == threat_level)\
-                         .order_by(HoneypotLog.event_time.desc())\
+            logs = session.query(HoneypotCommandLog)\
+                         .filter(HoneypotCommandLog.target_port == target_port)\
+                         .order_by(HoneypotCommandLog.event_time.desc())\
                          .limit(15)\
                          .all()
             
             session.close()
             
-            print(f"\n{Colors.OKCYAN}Logs with {threat_level} Threat:{Colors.ENDC}")
+            print(f"\n{Colors.OKCYAN}Logs on port {target_port}:{Colors.ENDC}")
             print(f"Found {len(logs)} events\n")
             for log in logs:
-                print(f"[{log.id}] {log.attacker_ip}:{log.attacker_port} → Port {log.target_port}")
-                if log.commands_executed:
-                    print(f"      Commands: {', '.join(log.commands_executed[:3])}")
+                print(f"[{log.id}] {log.attacker_ip} → Port {log.target_port} | CMD: {log.command_text or '(no data)'}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -852,9 +838,9 @@ class GodsEyeTestSuite:
             print(f"\n⏳ Filtering by {attacker_ip}...")
             session = self.db.get_session()
             
-            logs = session.query(HoneypotLog)\
-                         .filter(HoneypotLog.attacker_ip == attacker_ip)\
-                         .order_by(HoneypotLog.event_time.desc())\
+            logs = session.query(HoneypotCommandLog)\
+                         .filter(HoneypotCommandLog.attacker_ip == attacker_ip)\
+                         .order_by(HoneypotCommandLog.event_time.desc())\
                          .all()
             
             session.close()
@@ -863,37 +849,42 @@ class GodsEyeTestSuite:
             print(f"Found {len(logs)} events\n")
             
             if logs:
-                print(f"{'Port':<6} {'Threat':<8} {'Duration (ms)':<15}")
+                print(f"{'Port':<6} {'Command':<30}")
                 print("-" * 30)
                 for log in logs:
-                    print(f"{log.target_port:<6} {log.threat_level:<8} {log.session_duration_ms:<15}")
+                    print(f"{log.target_port:<6} {(log.command_text or '(no data)')[:30]:<30}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
     
-    def _filter_by_honeypot(self):
-        """Filter logs by honeypot ID"""
+    def _filter_by_command(self):
+        """Filter logs by command text contains"""
         try:
-            honeypot_id = input("Honeypot ID: ").strip()
+            command_query = input("Command contains: ").strip().lower()
+            if not command_query:
+                print(f"{Colors.FAIL}Please provide command text{Colors.ENDC}")
+                return
             
-            print(f"\n⏳ Filtering by {honeypot_id}...")
+            print(f"\n⏳ Filtering by command containing '{command_query}'...")
             session = self.db.get_session()
             
-            logs = session.query(HoneypotLog)\
-                         .filter(HoneypotLog.honeypot_id == honeypot_id)\
-                         .order_by(HoneypotLog.event_time.desc())\
+            logs = session.query(HoneypotCommandLog)\
+                         .filter(HoneypotCommandLog.command_text.isnot(None))\
+                         .order_by(HoneypotCommandLog.event_time.desc())\
                          .all()
             
             session.close()
+
+            logs = [log for log in logs if command_query in log.command_text.lower()]
             
-            print(f"\n{Colors.OKCYAN}Logs for {honeypot_id}:{Colors.ENDC}")
+            print(f"\n{Colors.OKCYAN}Logs with command containing '{command_query}':{Colors.ENDC}")
             print(f"Found {len(logs)} events\n")
             
             if logs:
-                print(f"{'Attacker':<20} {'Port':<6} {'Threat':<8}")
+                print(f"{'Attacker':<20} {'Port':<6} {'Command':<30}")
                 print("-" * 35)
                 for log in logs:
-                    print(f"{log.attacker_ip:<20} {log.target_port:<6} {log.threat_level:<8}")
+                    print(f"{log.attacker_ip:<20} {log.target_port:<6} {log.command_text[:30]:<30}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -906,7 +897,7 @@ class GodsEyeTestSuite:
             
             query = """
                 SELECT target_port, COUNT(*) as count
-                FROM honeypot_logs
+                FROM honeypot_command_logs
                 GROUP BY target_port
                 ORDER BY count DESC
                 LIMIT 10
@@ -933,7 +924,7 @@ class GodsEyeTestSuite:
             
             query = """
                 SELECT attacker_ip, COUNT(*) as count
-                FROM honeypot_logs
+                FROM honeypot_command_logs
                 GROUP BY attacker_ip
                 ORDER BY count DESC
                 LIMIT 10
@@ -964,18 +955,17 @@ class GodsEyeTestSuite:
             # Counts
             users_count = session.query(User).count()
             resources_count = session.query(Resource).count()
-            honeypot_logs_count = session.query(HoneypotLog).count()
+            honeypot_logs_count = session.query(HoneypotCommandLog).count()
             threats_count = session.query(Threat).filter(Threat.status == 'ACTIVE').count()
             
-            # High threat count
-            high_threat = session.query(HoneypotLog)\
-                                .filter(HoneypotLog.threat_level.in_(['HIGH', 'CRITICAL']))\
-                                .count()
-            
             # Unique attackers
-            unique_attackers = session.query(HoneypotLog.attacker_ip)\
+            unique_attackers = session.query(HoneypotCommandLog.attacker_ip)\
                                       .distinct()\
                                       .count()
+
+            empty_commands = session.query(HoneypotCommandLog)\
+                                  .filter(HoneypotCommandLog.command_text.is_(None))\
+                                  .count()
             
             session.close()
             
@@ -983,13 +973,9 @@ class GodsEyeTestSuite:
             print(f"  Users:              {users_count}")
             print(f"  Resources:          {resources_count}")
             print(f"  Honeypot Events:    {honeypot_logs_count}")
-            print(f"  High/Critical Hits: {high_threat}")
             print(f"  Active Threats:     {threats_count}")
             print(f"  Unique Attackers:   {unique_attackers}")
-            
-            if honeypot_logs_count > 0:
-                danger_percent = (high_threat / honeypot_logs_count) * 100
-                print(f"\n  {Colors.WARNING}⚠️  {danger_percent:.1f}% of events are HIGH/CRITICAL{Colors.ENDC}")
+            print(f"  Empty Commands:     {empty_commands}")
         
         except Exception as e:
             print(f"{Colors.FAIL}❌ Error: {str(e)}{Colors.ENDC}")
@@ -1016,30 +1002,21 @@ class GodsEyeTestSuite:
             session = self.db.get_session()
             
             events = [
-                ("192.168.1.10", 23, "admin", "password", "HIGH"),
-                ("10.0.0.5", 22, "root", "admin123", "CRITICAL"),
-                ("172.16.0.20", 21, "user", "pass", "MEDIUM"),
-                ("192.168.35.1", 3306, "mysql", "mysql", "HIGH"),
-                ("203.0.113.5", 110, "mail", "pop3pass", "MEDIUM"),
+                ("192.168.1.10", 23, "whoami"),
+                ("10.0.0.5", 22, "uname -a"),
+                ("172.16.0.20", 21, "(no data)"),
+                ("192.168.35.1", 3306, "show databases"),
+                ("203.0.113.5", 110, "user admin"),
             ]
             
-            for ip, port, user, pwd, threat in events:
-                log = HoneypotLog(
-                    honeypot_id="ESP32-DEMO",
-                    honeypot_name="Demo Server",
-                    honeypot_type="multi-service",
+            for ip, port, command in events:
+                log = HoneypotCommandLog(
                     attacker_ip=ip,
-                    attacker_port=54321,
                     target_port=port,
-                    username_attempted=user,
-                    password_attempted=pwd,
-                    commands_executed=[f"login as {user}"],
-                    auth_success=False,
-                    session_duration_ms=3000,
-                    threat_level=threat
+                    command_text=None if command == "(no data)" else command
                 )
                 session.add(log)
-                print(f"  ✓ {ip}:{port} ({threat})")
+                print(f"  ✓ {ip}:{port} ({command})")
             
             session.commit()
             session.close()

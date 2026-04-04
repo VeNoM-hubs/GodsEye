@@ -169,6 +169,13 @@ bool serialRequestedConfigMode() {
   while (Serial.available()) {
     char ch = (char)Serial.read();
 
+    if (ch == '\b' || ch == 127) {
+      if (serialBuffer.length() > 0) {
+        serialBuffer.remove(serialBuffer.length() - 1);
+      }
+      continue;
+    }
+
     if (ch == '\r' || ch == '\n') {
       serialBuffer.trim();
       if (serialBuffer.length() == 0) continue;
@@ -185,9 +192,21 @@ bool serialRequestedConfigMode() {
       continue;
     }
 
+    if (ch < 32 || ch > 126) {
+      continue;
+    }
+
     serialBuffer += ch;
     if (serialBuffer.length() > 64) {
       serialBuffer.remove(0, serialBuffer.length() - 64);
+    }
+
+    String inlineCommand = serialBuffer;
+    inlineCommand.trim();
+    inlineCommand.toLowerCase();
+    if (inlineCommand == "config") {
+      serialBuffer = "";
+      return true;
     }
   }
 
