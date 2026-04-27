@@ -37,7 +37,15 @@ const SOURCE_COLOR: Record<string, string> = {
 
 /* ── facility codes for realism ──────────────────────────────────────── */
 const FACILITIES = ["kernel", "auth", "sshd", "nginx", "systemd", "firewalld", "auditd", "cron"];
-const WAZUH_WS_URL = (import.meta as any).env?.VITE_WAZUH_WS_URL ?? "ws://10.188.231.155:8765";
+const DEFAULT_WAZUH_WS_URL = "ws://10.188.231.155:8765";
+
+function resolveWazuhWsUrl(): string {
+    const raw = (import.meta as any).env?.VITE_WAZUH_WS_URL ?? DEFAULT_WAZUH_WS_URL;
+    if (typeof window !== "undefined" && window.location.protocol === "https:" && raw.startsWith("ws://")) {
+        return raw.replace(/^ws:\/\//, "wss://");
+    }
+    return raw;
+}
 
 function formatLogLine(ge: GodsEyeEvent) {
     const e = ge.event;
@@ -85,6 +93,7 @@ export function CliTerminal({ events }: CliTerminalProps) {
     );
     const [copied, setCopied] = useState(false);
     const [paused, setPaused] = useState(false);
+    const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
     const bottomRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const processedIds = useRef<Set<string>>(new Set());
@@ -123,11 +132,18 @@ export function CliTerminal({ events }: CliTerminalProps) {
 
         function connect() {
             if (!alive) return;
+            setWsStatus("connecting");
             try {
-                ws = new WebSocket(WAZUH_WS_URL);
+                ws = new WebSocket(resolveWazuhWsUrl());
             } catch {
+                setWsStatus("disconnected");
                 return;
             }
+
+            ws.onopen = () => {
+                setWsStatus("connected");
+                appendRawLine("[wazuh] websocket connected", "ws");
+            };
 
             ws.onmessage = (event) => {
                 try {
@@ -148,8 +164,15 @@ export function CliTerminal({ events }: CliTerminalProps) {
                 }
             };
 
+            ws.onerror = () => {
+                setWsStatus("disconnected");
+                appendRawLine("[wazuh] websocket error", "ws");
+            };
+
             ws.onclose = () => {
                 if (!alive) return;
+                setWsStatus("disconnected");
+                appendRawLine("[wazuh] websocket disconnected", "ws");
                 reconnectTimer = window.setTimeout(connect, 4000);
             };
         }
@@ -218,7 +241,9 @@ export function CliTerminal({ events }: CliTerminalProps) {
                     <span>{lines.length} lines</span>
                     <span>enc: AES-256-GCM</span>
                 </div>
-                <span>relay: cluster-west-02 · pid 1</span>
+                <span>
+                    wazuh: {wsStatus} · relay: cluster-west-02 · pid 1
+                </span>
             </div>
 
             {/* log body */}
