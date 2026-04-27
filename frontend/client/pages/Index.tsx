@@ -1,16 +1,97 @@
+import { useMemo } from "react";
 import { Sidebar } from "@/components/cyber/Sidebar";
 import { Header } from "@/components/cyber/Header";
 import { SecurityWidgets } from "@/components/cyber/SecurityWidgets";
 import { LogViewer } from "@/components/cyber/LogViewer";
-import { DeviceList } from "@/components/cyber/DeviceList";
 import { CliTerminal } from "@/components/cyber/CliTerminal";
 import { AttackGraph } from "@/components/cyber/OrgEventsChart";
 import { ConnectionBadge } from "@/components/cyber/ConnectionBadge";
-import { useGodsEye } from "@/hooks/useGodsEye";
+import { useGodsEyeLive } from "@/hooks/useGodsEyeLive";
 import { motion } from "framer-motion";
+import type { GodsEyeEvent, SecurityAlert, DashboardStats } from "@shared/cyber-api";
+import type { WireEvent, WireAlert, WireDashboardStats } from "@shared/godseye-api-types";
+
+function adaptEvents(wireEvents: WireEvent[]): GodsEyeEvent[] {
+  return wireEvents.map((e) => ({
+    source: e.source,
+    event: {
+      event_id: e.event_id,
+      event_type: e.event_type as any,
+      timestamp: e.event_time,
+      // Fill required fields with sensible defaults based on event_type
+      ...(e.event_type === "access" ? {
+        device_id: e.resource_id ?? "unknown",
+        location: e.resource_id ?? "unknown",
+        access_method: "rfid" as const,
+        status: (e.severity === "HIGH" ? "anomaly" : e.severity === "MEDIUM" ? "denied" : "success") as any,
+        user_id: e.user_id ?? undefined,
+      } : e.event_type === "honeypot" ? {
+        honeypot_id: e.resource_id ?? "honeypot-1",
+        honeypot_type: "ssh",
+        source_ip: e.user_id ?? "0.0.0.0",
+        interaction_type: "connection" as const,
+        threat_level: e.severity,
+      } : e.event_type === "network" ? {
+        network_event_type: "suspicious_connection" as const,
+        source_ip: e.user_id ?? "0.0.0.0",
+        destination_ip: e.resource_id ?? "0.0.0.0",
+        protocol: "TCP",
+        anomaly_score: e.severity === "HIGH" ? 0.9 : e.severity === "MEDIUM" ? 0.6 : 0.3,
+        description: e.description,
+      } : e.event_type === "endpoint" ? {
+        hostname: e.resource_id ?? "unknown",
+        endpoint_id: e.resource_id ?? "ep-1",
+        operating_system: "Linux",
+        endpoint_event_type: "process_creation" as const,
+        severity: (e.severity as any) || "LOW",
+        description: e.description,
+      } : {
+        decoy_type: "teapot",
+        decoy_id: e.resource_id ?? "teapot-1",
+        threat_level: e.severity,
+        description: e.description ?? "Teapot triggered",
+      }),
+    } as any,
+  }));
+}
+
+function adaptAlerts(wireAlerts: WireAlert[]): SecurityAlert[] {
+  return wireAlerts.map((a) => ({
+    alert_id: a.alert_id,
+    alert_type: "correlation" as const,
+    severity: a.severity,
+    title: a.threat_pattern,
+    description: `${a.threat_pattern} — risk score ${a.risk_score}`,
+    source_event_id: a.threat_id,
+    timestamp: a.last_seen,
+    mitre_technique_id: a.mitre_technique ?? undefined,
+    mitre_technique_name: a.mitre_technique ?? undefined,
+    risk_score: a.risk_score,
+    acknowledged: a.status === "acknowledged",
+    resolved: a.status === "resolved",
+  }));
+}
+
+function adaptStats(wireStats: WireDashboardStats): DashboardStats {
+  const mitre_distribution = Object.entries(wireStats.mitre_breakdown ?? {}).map(
+    ([technique_id, count]) => ({ technique_id, technique_name: technique_id, count: count as number })
+  );
+  return {
+    active_threats: wireStats.active_threats,
+    access_violations: wireStats.total_violations,
+    events_per_minute: wireStats.events_per_minute,
+    top_flagged_users: [],
+    mitre_distribution,
+    targeted_resources: [],
+  };
+}
 
 export default function Index() {
-  const { events, alerts, stats, connectionStatus } = useGodsEye();
+  const { events: wireEvents, alerts: wireAlerts, stats: wireStats, ready, error, lastUpdated, setPaused, paused } = useGodsEyeLive();
+
+  const events = useMemo(() => adaptEvents(wireEvents), [wireEvents]);
+  const alerts = useMemo(() => adaptAlerts(wireAlerts), [wireAlerts]);
+  const stats = useMemo(() => wireStats ? adaptStats(wireStats) : null, [wireStats]);
 
   return (
     <div className="flex min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans subtle-grid overflow-hidden">
@@ -20,6 +101,14 @@ export default function Index() {
         <Header />
 
         <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide">
+          {error && (
+            <div className="bg-red-900/80 border-l-4 border-red-600 p-3 mb-4 rounded">
+              <p className="text-red-100 text-sm">
+                ⚠️ GodsEye API unreachable — showing last known data. {error}
+              </p>
+            </div>
+          )}
+
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -46,14 +135,14 @@ export default function Index() {
                 <div className="w-px h-8 bg-border/40 mx-1" />
                 <div className="flex flex-col text-right">
                   <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Threats</span>
-                  <span className="text-xs font-semibold text-rose-400">{stats.active_threats} Active</span>
+                  <span className="text-xs font-semibold text-rose-400">{stats?.active_threats ?? 0} Active</span>
                 </div>
               </div>
             </div>
           </motion.div>
 
           {/* ── Security Widgets ── */}
-          <SecurityWidgets stats={stats} />
+          {stats && <SecurityWidgets stats={stats} />}
 
           {/* ── Attack Graph ── */}
           <AttackGraph alerts={alerts} />
@@ -71,7 +160,7 @@ export default function Index() {
           </div>
         </div>
 
-        <ConnectionBadge status={connectionStatus} />
+        <ConnectionBadge status={ready && !error ? "connected" : "disconnected"} />
       </main>
     </div>
   );

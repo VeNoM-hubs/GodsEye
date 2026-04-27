@@ -301,3 +301,25 @@ export interface StatsResponse {
 }
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
+
+// ── ESP32 Honeypot Feed types ─────────────────────────────────────────────
+
+export interface HoneypotFeedEvent {
+  id: number;
+  honeypot_id: string | null;
+  attacker_ip: string;
+  target_port: number;
+  threat_level: string | null;
+  commands_executed: string[] | null;
+  auth_success: boolean;
+  timestamp: string; // ISO 8601
+}
+
+export interface HoneypotLogRow {
+  id: number;
+  attacker_ip: string;
+  target_port: number;
+  command_text: string | null;
+  event_time: string | null;  // ISO 8601
+  created_at: string | null;
+}

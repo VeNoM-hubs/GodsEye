@@ -1,6 +1,7 @@
 import type {
   MainLogRow, ThreatRow, ResourceRow,
-  StatsResponse, AlertSeverity
+  StatsResponse, AlertSeverity,
+  HoneypotFeedEvent, HoneypotLogRow
 } from "@shared/cyber-api";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -50,4 +51,20 @@ export async function resolveAlert(threatId: number): Promise<void> {
 export async function fetchResources(): Promise<ResourceRow[]> {
   const data = await get<{ resources: ResourceRow[] }>("/api/resources/with-activity");
   return data.resources;
+}
+
+export async function fetchHoneypotLogs(limit = 50): Promise<HoneypotFeedEvent[]> {
+  const data = await get<{ logs: HoneypotLogRow[] }>(
+    `/honeypot/logs?limit=${limit}&offset=0`
+  );
+  return data.logs.map((row) => ({
+    id:                row.id,
+    honeypot_id:       null,
+    attacker_ip:       row.attacker_ip,
+    target_port:       row.target_port,
+    threat_level:      null,
+    commands_executed: row.command_text ? [row.command_text] : null,
+    auth_success:      false,
+    timestamp:         row.event_time ?? row.created_at ?? new Date().toISOString(),
+  }));
 }
