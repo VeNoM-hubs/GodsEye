@@ -164,7 +164,7 @@ export function useGodsEye() {
 
   // ── WebSocket connection ──────────────────────────────────────────
   const connect = useCallback(() => {
-    const url = (import.meta as any).env?.VITE_WS_URL ?? "ws://localhost:8000/ws";
+    const url = (import.meta as any).env?.VITE_WS_URL ?? "ws://localhost:8000/ws/honeypot";
     const ws  = new WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");

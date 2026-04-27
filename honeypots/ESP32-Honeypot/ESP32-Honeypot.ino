@@ -172,7 +172,7 @@ void startHoneypot() {
   
   auto tryBegin = [](uint16_t port, WiFiServer & srv) {
     if (std::find(enabledPorts.begin(), enabledPorts.end(), port) != enabledPorts.end()) {
-      srv.begin(port);
+      srv.begin();
       Serial.println("[+] Honeypot port LISTENING: " + String(port));
       return true;
     } else {

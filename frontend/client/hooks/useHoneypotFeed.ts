@@ -27,7 +27,8 @@ export function useHoneypotFeed(): HoneypotEvent[] {
 
     function connect() {
       if (unmountedRef.current) return;
-      const ws = new WebSocket("ws://localhost:8000/ws/honeypot");
+      const wsUrl = (import.meta as any).env?.VITE_WS_URL ?? "ws://localhost:8000/ws/honeypot";
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onmessage = (e) => {

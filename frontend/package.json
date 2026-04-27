@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:backend": "cd .. && uvicorn backend.api_server:app --reload --port 8000",
+    "dev:backend": "cd .. && uvicorn backend.api_server:app --reload --host 0.0.0.0 --port 8000",
     "dev:full": "concurrently -n backend,frontend -c cyan,magenta \"pnpm dev:backend\" \"pnpm dev\"",
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",

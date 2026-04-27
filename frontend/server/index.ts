@@ -1,10 +1,10 @@
-import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { handleDemo } from "./routes/demo";
 import { createGodsEyeProxyRouter } from "./routes/godseye-proxy";
+import { getBackendApiUrl } from "./backend-url";
 
-const API_URL = process.env.GODSEYE_API_URL || "http://localhost:8000";
+const API_URL = getBackendApiUrl();
 
 export function createServer() {
   const app = express();
@@ -21,9 +21,6 @@ export function createServer() {
   });
 
   app.get("/api/demo", handleDemo);
-
-  // GodsEye proxy routes
-  app.use(createGodsEyeProxyRouter());
 
   // Health check endpoint for GodsEye backend
   app.get("/api/godseye/health", async (_req, res) => {
@@ -50,6 +47,9 @@ export function createServer() {
       });
     }
   });
+
+  // GodsEye proxy routes
+  app.use(createGodsEyeProxyRouter());
 
   return app;
 }

@@ -1,69 +1,57 @@
 import express, { Request, Response, Router } from "express";
+import { getBackendApiUrl } from "../backend-url";
 
-const API_URL = process.env.GODSEYE_API_URL || "http://localhost:8000";
+const API_URL = getBackendApiUrl();
+
+async function proxyRequest(req: Request, res: Response) {
+  try {
+    const targetUrl = new URL(req.originalUrl, API_URL);
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      headers["Content-Type"] = "application/json";
+    }
+
+    const response = await fetch(targetUrl.toString(), {
+      method: req.method,
+      headers,
+      body: req.method === "GET" || req.method === "HEAD"
+        ? undefined
+        : (typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {})),
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    const payload = response.status === 204
+      ? null
+      : contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+
+    console.log(`[GodsEye Proxy] ${req.method} ${targetUrl.toString()}`);
+
+    if (payload === null) {
+      res.status(response.status).send();
+    } else if (typeof payload === "string") {
+      res.status(response.status).send(payload);
+    } else {
+      res.status(response.status).json(payload);
+    }
+  } catch (error) {
+    console.error(`[GodsEye Proxy] Error fetching ${req.method} ${req.originalUrl}:`, error);
+    res.status(503).json({
+      error: "API unreachable",
+      message: "Failed to connect to GodsEye backend API",
+    });
+  }
+}
 
 export function createGodsEyeProxyRouter(): Router {
   const router = express.Router();
 
-  // Proxy GET requests to /api/dashboard/*
-  router.get("/api/dashboard/:endpoint", async (req: Request, res: Response) => {
-    try {
-      const endpoint = req.params.endpoint;
-      const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
-      const url = `${API_URL}/api/dashboard/${endpoint}${queryString ? `?${queryString}` : ""}`;
-
-      console.log(`[GodsEye Proxy] GET ${url}`);
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-      });
-
-      const data = await response.json();
-
-      res.status(response.status).json(data);
-    } catch (error) {
-      console.error(`[GodsEye Proxy] Error fetching ${req.path}:`, error);
-      res.status(503).json({
-        error: "API unreachable",
-        message: "Failed to connect to GodsEye backend API",
-      });
-    }
-  });
-
-  // Proxy PATCH requests to /api/dashboard/*
-  router.patch("/api/dashboard/:endpoint/:id/:action", async (req: Request, res: Response) => {
-    try {
-      const endpoint = req.params.endpoint;
-      const id = req.params.id;
-      const action = req.params.action;
-      const url = `${API_URL}/api/dashboard/${endpoint}/${id}/${action}`;
-
-      console.log(`[GodsEye Proxy] PATCH ${url}`);
-
-      const response = await fetch(url, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: req.body ? JSON.stringify(req.body) : undefined,
-      });
-
-      const data = await response.json();
-
-      res.status(response.status).json(data);
-    } catch (error) {
-      console.error(`[GodsEye Proxy] Error patching ${req.path}:`, error);
-      res.status(503).json({
-        error: "API unreachable",
-        message: "Failed to connect to GodsEye backend API",
-      });
-    }
-  });
+  router.all(/^\/api\/.*$/, proxyRequest);
+  router.all(/^\/honeypot\/.*$/, proxyRequest);
 
   return router;
 }
