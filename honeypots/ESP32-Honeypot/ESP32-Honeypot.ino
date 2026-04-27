@@ -10,6 +10,8 @@ String ssid, password, WebhookURL;
 const char* configPath = "/config.json";
 const char* logPath = "/honeypot_logs.txt";
 const char* indexPath = "/index.html";
+const char* apSsid = "HoneypotConfig";
+const char* apPassword = "HoneyPotConfig123";
 
 // Serial input buffer for config command detection
 String serialBuffer = "";
@@ -290,13 +292,13 @@ void setupWebUI() {
   });
 
   // Enable AP mode for initial setup
-  WiFi.softAP("HoneypotConfig", "HoneyPotConfig123");
+  WiFi.softAP(apSsid, apPassword);
   Serial.println("\n╔════════════════════════════════════════════════╗");
   Serial.println("║    CONFIGURATION MODE - Access Point Active    ║");
   Serial.println("╚════════════════════════════════════════════════╝");
   Serial.println("[*] Configuration Mode Enabled");
-  Serial.println("[+] Connect to Wi-Fi SSID: HoneypotConfig");
-  Serial.println("[+] Password             : HoneyPotConfig123");
+  Serial.println("[+] Connect to Wi-Fi SSID: " + String(apSsid));
+  Serial.println("[+] Password             : " + String(apPassword));
   Serial.println("[+] Web Interface        : http://" + WiFi.softAPIP().toString());
   Serial.println("\n[HINT] Type 'config' in serial monitor to re-enter config mode anytime\n");
 
@@ -1257,6 +1259,11 @@ void setup() {
   Serial.println("╚═══════════════════════════════════════╝\n");
   
   initSPIFFS();
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(apSsid, apPassword);
+  Serial.println("[+] AP fallback active: " + String(apSsid));
+  Serial.println("[+] AP IP: http://" + WiFi.softAPIP().toString());
 
   if (!loadConfig()) {
     Serial.println("[!] No configuration found or invalid config");
