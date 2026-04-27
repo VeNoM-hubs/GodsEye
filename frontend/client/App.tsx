@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import DevicesPage from "./pages/DevicesPage";
+import HoneypotPage from "./pages/HoneypotPage";
 import NotFound from "./pages/NotFound";
 import { PlaceholderPage } from "./components/cyber/PlaceholderPage";
 
@@ -22,7 +23,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/devices" element={<DevicesPage />} />
-          <Route path="/threats" element={<PlaceholderPage title="Threat Intelligence" />} />
+          <Route path="/threats" element={<HoneypotPage />} />
           <Route path="/logs" element={<PlaceholderPage title="System Log Stream" />} />
           <Route path="/access" element={<PlaceholderPage title="Access Permissions" />} />
           <Route path="/settings" element={<PlaceholderPage title="Core Configuration" />} />
