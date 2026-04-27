@@ -1,10 +1,10 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, Search, Globe, Shield } from "lucide-react";
+import { Search, Globe, Shield } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { SearchPanel } from "@/components/cyber/SearchPanel";
 import { useGlobalSearch } from "@/hooks/useGlobalSearch";
+import { NotificationBell } from "@/components/cyber/NotificationBell";
 
 export function Header() {
   const [query, setQuery]         = useState("");
@@ -73,10 +73,7 @@ export function Header() {
           <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Connected</span>
         </div>
 
-        <Button variant="ghost" size="icon" className="w-9 h-9 relative hover:bg-muted/40">
-          <Bell className="w-4.5 h-4.5 text-muted-foreground" />
-          <span className="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full bg-primary" />
-        </Button>
+        <NotificationBell />
 
         <div className="w-px h-4 bg-border/40 mx-2" />
 
