@@ -245,3 +245,59 @@ export interface Device {
   lastSeen: string;
   ip: string;
 }
+
+// ── Real DB row types (from PostgreSQL) ───────────────────────────────
+
+export interface MainLogRow {
+  id: number;
+  source: "PHYSICAL" | "DIGITAL";
+  source_ref_id: number;
+  user_id: string;
+  resource_id: string;
+  event_type: string;
+  severity: AlertSeverity;
+  event_time: string;          // ISO 8601
+  correlation_flag: boolean;
+}
+
+export interface ThreatRow {
+  threat_id: number;
+  user_id: string;
+  threat_pattern: string;
+  mitre_id: string | null;
+  risk_score: number;
+  first_seen: string;          // ISO 8601
+  last_seen: string;           // ISO 8601
+  event_count: number;
+  status: "ACTIVE" | "ACKNOWLEDGED" | "RESOLVED";
+}
+
+export interface ResourceRow {
+  resource_id: string;
+  resource_name: string;
+  resource_type: "door" | "server" | "database" | "file";
+  required_access_level: number;
+  is_sensitive: boolean;
+  // from /api/resources/with-activity join (nullable when no recent events)
+  last_severity?: AlertSeverity | null;
+  last_event_time?: string | null;
+  last_event_type?: string | null;
+}
+
+export interface WsMessage {
+  type: "batch" | "heartbeat";
+  events?: MainLogRow[];
+  threats?: ThreatRow[];
+  ts?: string;
+}
+
+export interface StatsResponse {
+  active_threats: number;
+  access_violations: number;
+  events_per_minute: number;
+  severity_distribution: Partial<Record<AlertSeverity, number>>;
+  top_users: Array<{ user_id: string; event_count: number }>;
+  high_risk_threats: ThreatRow[];
+}
+
+export type ConnectionStatus = "connecting" | "connected" | "disconnected";

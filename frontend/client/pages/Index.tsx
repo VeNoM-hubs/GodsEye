@@ -5,11 +5,12 @@ import { LogViewer } from "@/components/cyber/LogViewer";
 import { DeviceList } from "@/components/cyber/DeviceList";
 import { CliTerminal } from "@/components/cyber/CliTerminal";
 import { AttackGraph } from "@/components/cyber/OrgEventsChart";
+import { ConnectionBadge } from "@/components/cyber/ConnectionBadge";
 import { useGodsEye } from "@/hooks/useGodsEye";
 import { motion } from "framer-motion";
 
 export default function Index() {
-  const { events, alerts, stats } = useGodsEye();
+  const { events, alerts, stats, connectionStatus } = useGodsEye();
 
   return (
     <div className="flex min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans subtle-grid overflow-hidden">
@@ -70,13 +71,7 @@ export default function Index() {
           </div>
         </div>
 
-        {/* System Uplink Badge */}
-        <div className="absolute bottom-6 right-8 pointer-events-none z-50">
-          <div className="flex items-center gap-3 bg-card/60 backdrop-blur-md px-4 py-1.5 rounded-full border border-border/40 shadow-sm">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Gateway Connected: Cluster-West-02</span>
-          </div>
-        </div>
+        <ConnectionBadge status={connectionStatus} />
       </main>
     </div>
   );

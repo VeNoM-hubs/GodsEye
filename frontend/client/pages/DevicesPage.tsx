@@ -1,14 +1,37 @@
 import { Sidebar } from "@/components/cyber/Sidebar";
 import { Header } from "@/components/cyber/Header";
 import { DeviceGrid } from "@/components/cyber/DeviceGrid";
-import { MOCK_DEVICES } from "@/lib/mock-data";
+import { useResources } from "@/hooks/useResources";
 import { motion } from "framer-motion";
 import { Search, Filter, Monitor, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { ResourceRow, Device, AccessLevel } from "@shared/cyber-api";
+
+function accessLevelFromInt(level: number): AccessLevel {
+  if (level >= 8) return "Admin";
+  if (level >= 5) return "User";
+  if (level >= 3) return "Restricted";
+  return "Guest";
+}
+
+function mapResourceToDevice(r: ResourceRow): Device {
+  return {
+    id:          r.resource_id,
+    name:        r.resource_name,
+    type:        (["server","workstation","mobile","iot"].includes(r.resource_type)
+                   ? r.resource_type : "server") as Device["type"],
+    status:      r.last_severity ? "online" : "offline",
+    location:    { city: r.resource_id, lat: 0, lng: 0 },
+    accessLevel: accessLevelFromInt(r.required_access_level),
+    lastSeen:    r.last_event_time ?? new Date().toISOString(),
+    ip:          r.resource_id,
+  };
+}
 
 export default function DevicesPage() {
+  const { resources } = useResources();
   return (
     <div className="flex min-h-screen bg-background text-foreground subtle-grid overflow-hidden">
       <Sidebar />
@@ -27,7 +50,7 @@ export default function DevicesPage() {
                 Infrastructure Asset Management
               </h1>
               <p className="text-muted-foreground text-[11px] font-medium mt-1 uppercase tracking-widest opacity-80">
-                Centralized Node Inventory & Health Telemetry — {MOCK_DEVICES.length} Registered Assets
+                Centralized Node Inventory & Health Telemetry — {resources.length} Registered Assets
               </p>
             </div>
             
@@ -69,7 +92,7 @@ export default function DevicesPage() {
           </div>
 
           <div className="pb-12">
-            <DeviceGrid devices={MOCK_DEVICES} />
+            <DeviceGrid devices={resources.map(mapResourceToDevice)} />
           </div>
         </div>
       </main>
