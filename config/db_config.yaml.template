@@ -7,7 +7,7 @@ database:
   port: 5432
   name: godseye
   username: postgres
-  password: "YOUR_PASSWORD_HERE"
+  password: "1234"
   
   # Connection pool settings (optional)
   pool_size: 5
