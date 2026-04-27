@@ -63,6 +63,46 @@ def create_honeypot_router(db: GodsEyeDatabase):
     from backend.ws_manager import manager
 
     router = APIRouter(prefix="/honeypot", tags=["honeypot"])
+
+    def store_honeypot_event(event: HoneypotEventRequest) -> tuple[int, datetime, str, int, Optional[str]]:
+        attacker_ip = event.attacker_ip
+        target_port = event.target_port
+
+        if not attacker_ip or target_port is None:
+            raise ValueError("Both attacker_ip (or ip) and target_port (or port) are required")
+
+        # Parse timestamp
+        if event.timestamp:
+            try:
+                event_time = datetime.fromisoformat(event.timestamp)
+            except ValueError:
+                event_time = datetime.utcnow()
+        else:
+            event_time = datetime.utcnow()
+
+        normalized_command = (event.command_text or "").strip() if event.command_text else None
+        if normalized_command and normalized_command.lower() == "(no data)":
+            normalized_command = None
+
+        command_log = HoneypotCommandLog(
+            attacker_ip=attacker_ip,
+            target_port=target_port,
+            command_text=normalized_command,
+            event_time=event_time
+        )
+
+        session = db.get_session()
+        try:
+            session.add(command_log)
+            session.commit()
+            command_log_id = command_log.id
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+        return command_log_id, event_time, attacker_ip, target_port, normalized_command
     
     @router.post("/log", response_model=HoneypotEventResponse)
     async def log_honeypot_event(event: HoneypotEventRequest):
@@ -74,47 +114,7 @@ def create_honeypot_router(db: GodsEyeDatabase):
         {"attacker_ip":"192.168.0.1","target_port":445,"command_text":"ls"}
         """
         try:
-            attacker_ip = event.attacker_ip
-            target_port = event.target_port
-
-            if not attacker_ip or target_port is None:
-                return HoneypotEventResponse(
-                    success=False,
-                    message="Failed to store honeypot event",
-                    error="Both attacker_ip (or ip) and target_port (or port) are required"
-                )
-
-            # Parse timestamp
-            if event.timestamp:
-                try:
-                    event_time = datetime.fromisoformat(event.timestamp)
-                except ValueError:
-                    event_time = datetime.utcnow()
-            else:
-                event_time = datetime.utcnow()
-
-            normalized_command = (event.command_text or "").strip() if event.command_text else None
-            if normalized_command and normalized_command.lower() == "(no data)":
-                normalized_command = None
-
-            command_log = HoneypotCommandLog(
-                attacker_ip=attacker_ip,
-                target_port=target_port,
-                command_text=normalized_command,
-                event_time=event_time
-            )
-            
-            # Insert into database
-            session = db.get_session()
-            try:
-                session.add(command_log)
-                session.commit()
-                command_log_id = command_log.id
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()
+            command_log_id, event_time, attacker_ip, target_port, normalized_command = store_honeypot_event(event)
 
             # Broadcast to all connected WebSocket clients
             await manager.broadcast({
@@ -141,6 +141,12 @@ def create_honeypot_router(db: GodsEyeDatabase):
                 error=None
             )
         
+        except ValueError as e:
+            return HoneypotEventResponse(
+                success=False,
+                message="Failed to store honeypot event",
+                error=str(e)
+            )
         except Exception as e:
             error_msg = f"Failed to store honeypot event: {str(e)}"
             logger.error(f"❌ {error_msg}")

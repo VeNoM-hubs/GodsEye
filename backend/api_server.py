@@ -5,6 +5,7 @@ Provides webhook endpoints for receiving honeypot events from ESP32
 
 import os
 import sys
+from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,8 +17,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from backend.db_storage import GodsEyeDatabase
-from backend.honeypot_api import create_honeypot_router
+from backend.db_storage import GodsEyeDatabase, HoneypotCommandLog
+from backend.honeypot_api import create_honeypot_router, HoneypotEventRequest
 from backend.ws_broadcaster import get_ws_router
 from backend.events_router import create_events_router
 from backend.resources_router import create_resources_router
@@ -80,6 +81,64 @@ def create_app():
                 await websocket.receive_text()
         except WebSocketDisconnect:
             await honeypot_ws_manager.disconnect(websocket)
+
+    @app.websocket("/ws/ingest")
+    async def honeypot_ws_ingest(websocket: WebSocket):
+        await websocket.accept()
+        while True:
+            try:
+                payload = await websocket.receive_json()
+                event = HoneypotEventRequest.model_validate(payload)
+
+                # Store event (mirror POST /honeypot/log)
+                command_log_id = None
+                try:
+                    # Reuse DB logic via the honeypot router helper
+                    # Use a minimal local implementation to avoid circular imports
+                    attacker_ip = event.attacker_ip
+                    target_port = event.target_port
+                    if not attacker_ip or target_port is None:
+                        raise ValueError("Both attacker_ip (or ip) and target_port (or port) are required")
+
+                    if event.timestamp:
+                        try:
+                            event_time = datetime.fromisoformat(event.timestamp)
+                        except ValueError:
+                            event_time = datetime.utcnow()
+                    else:
+                        event_time = datetime.utcnow()
+
+                    normalized_command = (event.command_text or "").strip() if event.command_text else None
+                    if normalized_command and normalized_command.lower() == "(no data)":
+                        normalized_command = None
+
+                    command_log = HoneypotCommandLog(
+                        attacker_ip=attacker_ip,
+                        target_port=target_port,
+                        command_text=normalized_command,
+                        event_time=event_time
+                    )
+
+                    session = db.get_session()
+                    try:
+                        session.add(command_log)
+                        session.commit()
+                        command_log_id = command_log.id
+                    except Exception:
+                        session.rollback()
+                        raise
+                    finally:
+                        session.close()
+
+                    await websocket.send_json({
+                        "ok": True,
+                        "id": command_log_id,
+                        "timestamp": event_time.isoformat(),
+                    })
+                except Exception as exc:
+                    await websocket.send_json({"ok": False, "error": str(exc)})
+            except WebSocketDisconnect:
+                break
     
     # Health check endpoint
     @app.get("/health")

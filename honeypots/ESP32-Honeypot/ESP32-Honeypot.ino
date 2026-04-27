@@ -169,46 +169,33 @@ bool loadConfig() {
 
 void startHoneypot() {
   Serial.println("\n[*] Starting honeypot servers...");
-  
+
   auto tryBegin = [](uint16_t port, WiFiServer & srv) {
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), port) != enabledPorts.end()) {
-      srv.begin();
-      Serial.println("[+] Honeypot port LISTENING: " + String(port));
-      return true;
-    } else {
-      Serial.println("[-] Port " + String(port) + " disabled in config");
-      return false;
-    }
+    srv.begin();  // ✅ FIXED
+    Serial.println("[+] Listening on port: " + String(port));
   };
-  
-  int boundPorts = 0;
-  if (tryBegin(21,  ftpServer)) boundPorts++;
-  if (tryBegin(22,  sshServer)) boundPorts++;
-  if (tryBegin(23,  honeypotServer)) boundPorts++;
-  if (tryBegin(25,  smtpServer)) boundPorts++;
-  if (tryBegin(53,  dnsServer)) boundPorts++;
-  if (tryBegin(110, pop3Server)) boundPorts++;
-  if (tryBegin(143, imapServer)) boundPorts++;
-  if (tryBegin(443, httpServer)) boundPorts++;
-  if (tryBegin(445, smbServer)) boundPorts++;
-  if (tryBegin(3306, mysqlServer)) boundPorts++;
-  if (tryBegin(3389, rdpServer)) boundPorts++;
-  if (tryBegin(5900, vncServer)) boundPorts++;
-  if (tryBegin(8080, ahttpServer)) boundPorts++;
-  
-  if (enabledPorts.size() == 0) {
-    Serial.println("[!] WARNING: No ports enabled! Check config file at /config.json");
-    Serial.println("[*] Add port 23 to enable Telnet honeypot");
-    } else if (boundPorts == 0) {
-      Serial.println("[!] ERROR: No ports could be bound! Possible causes:");
-      Serial.println("    - Ports already in use");
-      Serial.println("    - WiFi not connected");
-      Serial.println("    - Out of memory");
+
+  for (auto port : enabledPorts) {
+    switch (port) {
+      case 21: tryBegin(21, ftpServer); break;
+      case 22: tryBegin(22, sshServer); break;
+      case 23: tryBegin(23, honeypotServer); break;
+      case 25: tryBegin(25, smtpServer); break;
+      case 53: tryBegin(53, dnsServer); break;
+      case 110: tryBegin(110, pop3Server); break;
+      case 143: tryBegin(143, imapServer); break;
+      case 443: tryBegin(443, httpServer); break;
+      case 445: tryBegin(445, smbServer); break;
+      case 3306: tryBegin(3306, mysqlServer); break;
+      case 3389: tryBegin(3389, rdpServer); break;
+      case 5900: tryBegin(5900, vncServer); break;
+      case 8080: tryBegin(8080, ahttpServer); break;
+    }
   }
-  
+
   honeypotServersStarted = true;
-  Serial.println("[+] Honeypot mode active. " + String(boundPorts) + "/" + String(enabledPorts.size()) + " ports successfully bound.");
-  Serial.println("[*] Type 'status' in serial monitor for diagnostics");
+
+  Serial.println("[+] Honeypot ACTIVE");
 }
 
 
