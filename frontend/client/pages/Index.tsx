@@ -4,12 +4,12 @@ import { Header } from "@/components/cyber/Header";
 import { SecurityWidgets } from "@/components/cyber/SecurityWidgets";
 import { LogViewer } from "@/components/cyber/LogViewer";
 import { CliTerminal } from "@/components/cyber/CliTerminal";
-import { AttackGraph } from "@/components/cyber/OrgEventsChart";
+import { OverviewTrendsChart } from "@/components/cyber/OverviewTrendsChart";
 import { ConnectionBadge } from "@/components/cyber/ConnectionBadge";
 import { useGodsEyeLive } from "@/hooks/useGodsEyeLive";
 import { motion } from "framer-motion";
-import type { GodsEyeEvent, SecurityAlert, DashboardStats } from "@shared/cyber-api";
-import type { WireEvent, WireAlert, WireDashboardStats } from "@shared/godseye-api-types";
+import type { GodsEyeEvent, DashboardStats } from "@shared/cyber-api";
+import type { WireEvent, WireDashboardStats } from "@shared/godseye-api-types";
 
 function adaptEvents(wireEvents: WireEvent[]): GodsEyeEvent[] {
   return wireEvents.map((e) => ({
@@ -55,23 +55,6 @@ function adaptEvents(wireEvents: WireEvent[]): GodsEyeEvent[] {
   }));
 }
 
-function adaptAlerts(wireAlerts: WireAlert[]): SecurityAlert[] {
-  return wireAlerts.map((a) => ({
-    alert_id: a.alert_id,
-    alert_type: "correlation" as const,
-    severity: a.severity,
-    title: a.threat_pattern,
-    description: `${a.threat_pattern} — risk score ${a.risk_score}`,
-    source_event_id: a.threat_id,
-    timestamp: a.last_seen,
-    mitre_technique_id: a.mitre_technique ?? undefined,
-    mitre_technique_name: a.mitre_technique ?? undefined,
-    risk_score: a.risk_score,
-    acknowledged: a.status === "acknowledged",
-    resolved: a.status === "resolved",
-  }));
-}
-
 function adaptStats(wireStats: WireDashboardStats): DashboardStats {
   const mitre_distribution = Object.entries(wireStats.mitre_breakdown ?? {}).map(
     ([technique_id, count]) => ({ technique_id, technique_name: technique_id, count: count as number })
@@ -87,11 +70,22 @@ function adaptStats(wireStats: WireDashboardStats): DashboardStats {
 }
 
 export default function Index() {
-  const { events: wireEvents, alerts: wireAlerts, stats: wireStats, ready, error, lastUpdated, setPaused, paused } = useGodsEyeLive();
+  const { events: wireEvents, stats: wireStats, ready, error, lastUpdated } = useGodsEyeLive();
 
   const events = useMemo(() => adaptEvents(wireEvents), [wireEvents]);
-  const alerts = useMemo(() => adaptAlerts(wireAlerts), [wireAlerts]);
   const stats = useMemo(() => wireStats ? adaptStats(wireStats) : null, [wireStats]);
+
+  const activeUsers = useMemo(() => {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    const unique = new Set<string>();
+    for (const ev of wireEvents) {
+      if (!ev.user_id) continue;
+      const ts = ev.event_time ? new Date(ev.event_time).getTime() : 0;
+      if (ts && ts < cutoff) continue;
+      unique.add(ev.user_id);
+    }
+    return unique.size;
+  }, [wireEvents]);
 
   return (
     <div className="flex min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans subtle-grid overflow-hidden">
@@ -144,8 +138,13 @@ export default function Index() {
           {/* ── Security Widgets ── */}
           {stats && <SecurityWidgets stats={stats} />}
 
-          {/* ── Attack Graph ── */}
-          <AttackGraph alerts={alerts} />
+          {/* ── Operational Trends ── */}
+          <OverviewTrendsChart
+            eventsPerMinute={wireStats?.events_per_minute ?? 0}
+            activeUsers={activeUsers}
+            accessViolations={wireStats?.total_violations ?? 0}
+            updatedAt={lastUpdated}
+          />
 
           {/* ── CLI Terminal + Structured Logs ── */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-fit lg:h-[640px] pb-12">

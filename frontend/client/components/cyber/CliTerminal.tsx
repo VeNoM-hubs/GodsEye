@@ -37,6 +37,7 @@ const SOURCE_COLOR: Record<string, string> = {
 
 /* ── facility codes for realism ──────────────────────────────────────── */
 const FACILITIES = ["kernel", "auth", "sshd", "nginx", "systemd", "firewalld", "auditd", "cron"];
+const WAZUH_WS_URL = (import.meta as any).env?.VITE_WAZUH_WS_URL ?? "ws://10.188.231.155:8765";
 
 function formatLogLine(ge: GodsEyeEvent) {
     const e = ge.event;
@@ -71,6 +72,7 @@ interface CliLine {
     isRaw?: boolean;
     content?: string;
     parts?: ReturnType<typeof formatLogLine>;
+    kind?: "boot" | "ws";
 }
 
 interface CliTerminalProps {
@@ -79,13 +81,18 @@ interface CliTerminalProps {
 
 export function CliTerminal({ events }: CliTerminalProps) {
     const [lines, setLines] = useState<CliLine[]>(() =>
-        BOOT_LINES.map((b, i) => ({ id: `boot-${i}`, isRaw: true, content: b }))
+        BOOT_LINES.map((b, i) => ({ id: `boot-${i}`, isRaw: true, content: b, kind: "boot" }))
     );
     const [copied, setCopied] = useState(false);
     const [paused, setPaused] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const processedIds = useRef<Set<string>>(new Set());
+
+    const appendRawLine = useCallback((content: string, kind: "boot" | "ws") => {
+        const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        setLines((prev) => [...prev, { id, isRaw: true, content, kind }].slice(-200));
+    }, []);
 
     const autoScroll = useCallback(() => {
         if (paused) return;
@@ -108,6 +115,53 @@ export function CliTerminal({ events }: CliTerminalProps) {
         }
         if (changed) setLines((prev) => [...prev, ...newLines].slice(-200));
     }, [events]);
+
+    useEffect(() => {
+        let ws: WebSocket | null = null;
+        let reconnectTimer: number | undefined;
+        let alive = true;
+
+        function connect() {
+            if (!alive) return;
+            try {
+                ws = new WebSocket(WAZUH_WS_URL);
+            } catch {
+                return;
+            }
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data) as {
+                        time?: string;
+                        agent?: string;
+                        rule?: string;
+                        severity?: number | string;
+                    };
+                    const time = data.time ?? new Date().toISOString();
+                    const agent = data.agent ?? "unknown";
+                    const rule = data.rule ?? "unknown";
+                    const severity = data.severity ?? "n/a";
+                    const line = `[${time}] ${agent} -> ${rule} (lvl:${severity})`;
+                    appendRawLine(line, "ws");
+                } catch {
+                    // ignore malformed messages
+                }
+            };
+
+            ws.onclose = () => {
+                if (!alive) return;
+                reconnectTimer = window.setTimeout(connect, 4000);
+            };
+        }
+
+        connect();
+
+        return () => {
+            alive = false;
+            if (reconnectTimer) window.clearTimeout(reconnectTimer);
+            ws?.close();
+        };
+    }, [appendRawLine]);
 
     useEffect(() => { autoScroll(); }, [lines, autoScroll]);
 
@@ -179,7 +233,9 @@ export function CliTerminal({ events }: CliTerminalProps) {
                             className="leading-[1.7] text-[11px] whitespace-pre-wrap break-all"
                         >
                             {line.isRaw ? (
-                                <span className="text-muted-foreground/30 italic">{line.content}</span>
+                                <span className={line.kind === "ws" ? "text-emerald-400/80" : "text-muted-foreground/30 italic"}>
+                                    {line.content}
+                                </span>
                             ) : (
                                 <LogLine parts={line.parts!} />
                             )}
