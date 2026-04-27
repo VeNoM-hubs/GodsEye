@@ -6,11 +6,11 @@ import { DeviceList } from "@/components/cyber/DeviceList";
 import { CliTerminal } from "@/components/cyber/CliTerminal";
 import { AttackGraph } from "@/components/cyber/OrgEventsChart";
 import { ConnectionBadge } from "@/components/cyber/ConnectionBadge";
-import { useGodsEye } from "@/hooks/useGodsEye";
+import { useGodsEyeLive } from "@/hooks/useGodsEyeLive";
 import { motion } from "framer-motion";
 
 export default function Index() {
-  const { events, alerts, stats, connectionStatus } = useGodsEye();
+  const { events, alerts, stats, ready, error, lastUpdated, setPaused, paused } = useGodsEyeLive();
 
   return (
     <div className="flex min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans subtle-grid overflow-hidden">
@@ -20,6 +20,14 @@ export default function Index() {
         <Header />
 
         <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide">
+          {error && (
+            <div className="bg-red-900/80 border-l-4 border-red-600 p-3 mb-4 rounded">
+              <p className="text-red-100 text-sm">
+                ⚠️ GodsEye API unreachable — showing last known data. {error}
+              </p>
+            </div>
+          )}
+
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -46,14 +54,14 @@ export default function Index() {
                 <div className="w-px h-8 bg-border/40 mx-1" />
                 <div className="flex flex-col text-right">
                   <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Threats</span>
-                  <span className="text-xs font-semibold text-rose-400">{stats.active_threats} Active</span>
+                  <span className="text-xs font-semibold text-rose-400">{stats?.active_threats ?? 0} Active</span>
                 </div>
               </div>
             </div>
           </motion.div>
 
           {/* ── Security Widgets ── */}
-          <SecurityWidgets stats={stats} />
+          {stats && <SecurityWidgets stats={stats} />}
 
           {/* ── Attack Graph ── */}
           <AttackGraph alerts={alerts} />
@@ -71,7 +79,7 @@ export default function Index() {
           </div>
         </div>
 
-        <ConnectionBadge status={connectionStatus} />
+        <ConnectionBadge status={ready && !error ? "connected" : "disconnected"} />
       </main>
     </div>
   );

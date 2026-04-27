@@ -21,6 +21,7 @@ from backend.honeypot_api import create_honeypot_router
 from backend.ws_broadcaster import get_ws_router
 from backend.events_router import create_events_router
 from backend.resources_router import create_resources_router
+from backend.dashboard_api import create_dashboard_router
 from backend.ws_manager import manager as honeypot_ws_manager
 
 # Setup logging
@@ -68,6 +69,7 @@ def create_app():
     # Include new routers
     app.include_router(create_events_router(db))
     app.include_router(create_resources_router(db))
+    app.include_router(create_dashboard_router(db))
     app.include_router(get_ws_router(db))
 
     @app.websocket("/ws/honeypot")
