@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Sidebar } from "@/components/cyber/Sidebar";
 import { Header } from "@/components/cyber/Header";
 import { DeviceGrid } from "@/components/cyber/DeviceGrid";
@@ -32,6 +33,20 @@ function mapResourceToDevice(r: ResourceRow): Device {
 
 export default function DevicesPage() {
   const { resources } = useResources();
+  const [deviceQuery, setDeviceQuery] = useState("");
+
+  const filteredResources = deviceQuery.trim()
+    ? resources.filter((r) => {
+        const q = deviceQuery.toLowerCase().trim();
+        return (
+          r.resource_id.toLowerCase().includes(q) ||
+          r.resource_name.toLowerCase().includes(q) ||
+          r.resource_type.toLowerCase().includes(q) ||
+          (r.last_severity ?? "").toLowerCase().includes(q)
+        );
+      })
+    : resources;
+
   return (
     <div className="flex min-h-screen bg-background text-foreground subtle-grid overflow-hidden">
       <Sidebar />
@@ -50,7 +65,10 @@ export default function DevicesPage() {
                 Infrastructure Asset Management
               </h1>
               <p className="text-muted-foreground text-[11px] font-medium mt-1 uppercase tracking-widest opacity-80">
-                Centralized Node Inventory & Health Telemetry — {resources.length} Registered Assets
+                Centralized Node Inventory &amp; Health Telemetry —{" "}
+                {deviceQuery.trim()
+                  ? `${filteredResources.length} of ${resources.length} Assets`
+                  : `${resources.length} Registered Assets`}
               </p>
             </div>
             
@@ -66,7 +84,9 @@ export default function DevicesPage() {
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search by ID, Hostname, or Location..."
+                value={deviceQuery}
+                onChange={(e) => setDeviceQuery(e.target.value)}
+                placeholder="Search by ID, Hostname, or Type..."
                 className="pl-10 h-9 bg-background/50 border-border/40 rounded-md focus:border-primary/40 transition-all text-sm"
               />
             </div>
@@ -92,7 +112,7 @@ export default function DevicesPage() {
           </div>
 
           <div className="pb-12">
-            <DeviceGrid devices={resources.map(mapResourceToDevice)} />
+            <DeviceGrid devices={filteredResources.map(mapResourceToDevice)} />
           </div>
         </div>
       </main>

@@ -148,14 +148,12 @@ export default function Index() {
           <AttackGraph alerts={alerts} />
 
           {/* ── CLI Terminal + Structured Logs ── */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-fit lg:h-[600px] pb-12">
-            <div className="xl:col-span-2 h-full flex flex-col gap-8">
-              <div className="flex-1 min-h-[420px]">
-                <CliTerminal events={events} />
-              </div>
-            </div>
-            <div className="h-full min-h-[500px] xl:min-h-0 flex flex-col">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-fit lg:h-[640px] pb-12">
+            <div className="xl:col-span-2 h-full min-h-[560px] flex flex-col">
               <LogViewer events={events} />
+            </div>
+            <div className="h-full min-h-[360px] xl:min-h-0 flex flex-col">
+              <CliTerminal events={events} />
             </div>
           </div>
         </div>
