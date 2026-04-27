@@ -5,7 +5,7 @@ Receives POST requests from ESP32 honeypot and stores them in the database
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 import logging
 
@@ -26,6 +26,11 @@ class HoneypotEventRequest(BaseModel):
     target_port: Optional[int] = Field(None, description="Honeypot target port (23 for telnet, 21 for FTP, etc)", alias="port")
     command_text: Optional[str] = Field(None, description="Single command text from simple payload", alias="command")
     timestamp: Optional[str] = Field(None, description="Event timestamp (ISO-8601)")
+    # Extended ESP32 fields — accepted for broadcast, not persisted to DB
+    honeypot_id: Optional[str] = Field(None, description="ESP32 honeypot identifier")
+    threat_level: Optional[str] = Field(None, description="Threat classification: LOW/MEDIUM/HIGH/CRITICAL")
+    commands_executed: Optional[List[str]] = Field(None, description="List of commands executed by attacker")
+    auth_success: Optional[bool] = Field(None, description="Whether authentication succeeded")
 
     model_config = {
         "populate_by_name": True
@@ -55,7 +60,8 @@ def create_honeypot_router(db: GodsEyeDatabase):
         APIRouter with honeypot endpoints
     """
     from fastapi import APIRouter
-    
+    from backend.ws_manager import manager
+
     router = APIRouter(prefix="/honeypot", tags=["honeypot"])
     
     @router.post("/log", response_model=HoneypotEventResponse)
@@ -109,6 +115,19 @@ def create_honeypot_router(db: GodsEyeDatabase):
                 raise
             finally:
                 session.close()
+
+            # Broadcast to all connected WebSocket clients
+            await manager.broadcast({
+                "event": "honeypot_hit",
+                "id": command_log_id,
+                "honeypot_id": event.honeypot_id,
+                "attacker_ip": attacker_ip,
+                "target_port": target_port,
+                "threat_level": event.threat_level,
+                "commands_executed": event.commands_executed,
+                "auth_success": event.auth_success,
+                "timestamp": event_time.isoformat(),
+            })
             
             logger.info(
                 f"✅ Honeypot command logged [ID: {command_log_id}] - "

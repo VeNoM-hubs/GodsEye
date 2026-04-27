@@ -6,7 +6,7 @@ Provides webhook endpoints for receiving honeypot events from ESP32
 import os
 import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
@@ -21,6 +21,7 @@ from backend.honeypot_api import create_honeypot_router
 from backend.ws_broadcaster import get_ws_router
 from backend.events_router import create_events_router
 from backend.resources_router import create_resources_router
+from backend.ws_manager import manager as honeypot_ws_manager
 
 # Setup logging
 logging.basicConfig(
@@ -68,6 +69,15 @@ def create_app():
     app.include_router(create_events_router(db))
     app.include_router(create_resources_router(db))
     app.include_router(get_ws_router(db))
+
+    @app.websocket("/ws/honeypot")
+    async def honeypot_ws_endpoint(websocket: WebSocket):
+        await honeypot_ws_manager.connect(websocket)
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            await honeypot_ws_manager.disconnect(websocket)
     
     # Health check endpoint
     @app.get("/health")
@@ -101,9 +111,11 @@ def create_app():
     return app
 
 
+# Module-level app for uvicorn: uvicorn backend.api_server:app
+app = create_app()
+
+
 if __name__ == "__main__":
-    app = create_app()
-    
     # Run server
     logger.info("🚀 Starting GodsEye Honeypot API Server")
     logger.info("📍 Listening on http://0.0.0.0:8000")
