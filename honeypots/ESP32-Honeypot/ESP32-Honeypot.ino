@@ -1,9 +1,8 @@
-#include <AsyncTCP.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WebServer.h>
 #include <SPIFFS.h>
 #include <HTTPClient.h>
-#include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <vector>
 
@@ -11,6 +10,11 @@ String ssid, password, WebhookURL;
 const char* configPath = "/config.json";
 const char* logPath = "/honeypot_logs.txt";
 const char* indexPath = "/index.html";
+
+// Serial input buffer for config command detection
+String serialBuffer = "";
+unsigned long lastSerialInput = 0;
+const unsigned long SERIAL_TIMEOUT = 1000; // 1 second timeout for detecting command without line ending
 
 WiFiServer ftpServer(21);
 WiFiServer sshServer(22);
@@ -28,7 +32,9 @@ WiFiServer ahttpServer(8080);
 
 std::vector<uint16_t> enabledPorts;
 
-AsyncWebServer webServer(80);
+WebServer webServer(80);
+bool honeypotServersStarted = false;
+bool configPortalActive = false;
 
 
 void createFileIfMissing(const char* path, const char* content) {
@@ -150,254 +156,152 @@ bool loadConfig() {
   ssid = doc["ssid"].as<String>();
   password = doc["password"].as<String>();
   WebhookURL = doc["webhook"].as<String>();
-  ssid.trim();
-  password.trim();
-  WebhookURL.trim();
 
   enabledPorts.clear();
   for (JsonVariant port : doc["ports"].as<JsonArray>()) {
     enabledPorts.push_back(port.as<uint16_t>());
   }
 
-  return ssid.length() > 0;
-}
-
-bool serialRequestedConfigMode() {
-  static String serialBuffer;
-
-  while (Serial.available()) {
-    char ch = (char)Serial.read();
-
-    if (ch == '\b' || ch == 127) {
-      if (serialBuffer.length() > 0) {
-        serialBuffer.remove(serialBuffer.length() - 1);
-      }
-      continue;
-    }
-
-    if (ch == '\r' || ch == '\n') {
-      serialBuffer.trim();
-      if (serialBuffer.length() == 0) continue;
-
-      String command = serialBuffer;
-      serialBuffer = "";
-      command.toLowerCase();
-
-      if (command == "config") {
-        return true;
-      }
-
-      Serial.println("[SERIAL] Unknown command: " + command);
-      continue;
-    }
-
-    if (ch < 32 || ch > 126) {
-      continue;
-    }
-
-    serialBuffer += ch;
-    if (serialBuffer.length() > 64) {
-      serialBuffer.remove(0, serialBuffer.length() - 64);
-    }
-
-    String inlineCommand = serialBuffer;
-    inlineCommand.trim();
-    inlineCommand.toLowerCase();
-    if (inlineCommand == "config") {
-      serialBuffer = "";
-      return true;
-    }
-  }
-
-  return false;
-}
-
-void stopHoneypotServers() {
-  ftpServer.stop();
-  sshServer.stop();
-  honeypotServer.stop();
-  smtpServer.stop();
-  dnsServer.stop();
-  pop3Server.stop();
-  imapServer.stop();
-  httpServer.stop();
-  smbServer.stop();
-  mysqlServer.stop();
-  rdpServer.stop();
-  vncServer.stop();
-  ahttpServer.stop();
+  return ssid.length() > 0 && password.length() > 0;
 }
 
 void startHoneypot() {
+  Serial.println("\n[*] Starting honeypot servers...");
+  
   auto tryBegin = [](uint16_t port, WiFiServer & srv) {
     if (std::find(enabledPorts.begin(), enabledPorts.end(), port) != enabledPorts.end()) {
       srv.begin();
-      Serial.println("[+] Honeypot port enabled: " + String(port));
+      Serial.println("[+] Honeypot port LISTENING: " + String(port));
+      return true;
+    } else {
+      Serial.println("[-] Port " + String(port) + " disabled in config");
+      return false;
     }
   };
-  tryBegin(21,  ftpServer);
-  tryBegin(22,  sshServer);
-  tryBegin(23,  honeypotServer);
-  tryBegin(25,  smtpServer);
-  tryBegin(53,  dnsServer);
-  tryBegin(110, pop3Server);
-  tryBegin(143, imapServer);
-  tryBegin(443, httpServer);
-  tryBegin(445, smbServer);
-  tryBegin(3306, mysqlServer);
-  tryBegin(3389, rdpServer);
-  tryBegin(5900, vncServer);
-  tryBegin(8080, ahttpServer);
-
-  while (true) {
-    if (serialRequestedConfigMode()) {
-      Serial.println("[SERIAL] 'config' command received. Switching to config mode...");
-      stopHoneypotServers();
-      WiFi.disconnect();
-      delay(100);
-      setupWebUI();
-      return;
-    }
-
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 23) != enabledPorts.end()) {
-      if (WiFiClient client = honeypotServer.accept())
-        handleHoneypotClient(client);
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 21) != enabledPorts.end()) {
-      if (WiFiClient c = ftpServer.accept())
-        handleBannerGrab(c, 21, "220 ProFTPD 1.3.5 Server (Debian) [::ffff:192.168.1.10]\r\n");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 22) != enabledPorts.end()) {
-      if (WiFiClient c = sshServer.accept())
-        handleBannerGrab(c, 22, "SSH-2.0-OpenSSH_8.5 Debian-1");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 25) != enabledPorts.end()) {
-      if (WiFiClient c = smtpServer.accept())
-        handleBannerGrab(c, 25, "220 mail.local ESMTP Exim 4.94.2\r\n");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 53) != enabledPorts.end()) {
-      if (WiFiClient c = dnsServer.accept()) {
-        const uint8_t dnsBanner[] = {
-          0x00, 0x00, 0x81, 0x80,
-          0x00, 0x01, 0x00, 0x01,
-          0x00, 0x00, 0x00, 0x00
-        };
-        handleBannerGrab(c, 53, dnsBanner, sizeof(dnsBanner));
-      }
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 110) != enabledPorts.end()) {
-      if (WiFiClient c = pop3Server.accept())
-        handleBannerGrab(c, 110, "+OK Dovecot ready.\r\n");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 143) != enabledPorts.end()) {
-      if (WiFiClient c = imapServer.accept())
-        handleBannerGrab(c, 143, "* OK [CAPABILITY IMAP4rev1 ...] Dovecot ready.\r\n");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 443) != enabledPorts.end()) {
-      if (WiFiClient c = httpServer.accept())
-        handleBannerGrab(c, 443, "HTTP/1.1 200 OK\r\nServer: Apache/2.4.52 (Debian)\r\n\r\n<html><body><h1>It works!</h1></body></html>");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 445) != enabledPorts.end()) {
-      if (WiFiClient c = smbServer.accept()) {
-        const uint8_t smbBanner[] = {
-          0x00, 0x00, 0x00, 0x85,
-          0xff, 0x53, 0x4d, 0x42,
-          0x72, 0x00, 0x00, 0x00,
-          0x00, 0x88, 0x01, 0xc8,
-          0x00, 0x00, 0x00, 0x00
-        };
-        handleBannerGrab(c, 445, smbBanner, sizeof(smbBanner));
-      }
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 3306) != enabledPorts.end()) {
-      if (WiFiClient c = mysqlServer.accept())
-        handleBannerGrab(c, 3306, "J\x00\x00\x00\x0a5.7.31-0Debian0.18.04.1\x00\r\n");
-    }
-    if (std::find(enabledPorts.begin(), enabledPorts.end(), 3389) != enabledPorts.end()) {
-      if (WiFiClient c = rdpServer.accept()) {
-        const uint8_t rdpBanner[] = {
-          0x03, 0x00, 0x00, 0x0b,
-          0x06, 0xd0, 0x00, 0x00,
-          0x12, 0x34, 0x00
-        };
-        handleBannerGrab(c, 3389, rdpBanner, sizeof(rdpBanner));
-      }
-    }
-    delay(10);
+  
+  int boundPorts = 0;
+  if (tryBegin(21,  ftpServer)) boundPorts++;
+  if (tryBegin(22,  sshServer)) boundPorts++;
+  if (tryBegin(23,  honeypotServer)) boundPorts++;
+  if (tryBegin(25,  smtpServer)) boundPorts++;
+  if (tryBegin(53,  dnsServer)) boundPorts++;
+  if (tryBegin(110, pop3Server)) boundPorts++;
+  if (tryBegin(143, imapServer)) boundPorts++;
+  if (tryBegin(443, httpServer)) boundPorts++;
+  if (tryBegin(445, smbServer)) boundPorts++;
+  if (tryBegin(3306, mysqlServer)) boundPorts++;
+  if (tryBegin(3389, rdpServer)) boundPorts++;
+  if (tryBegin(5900, vncServer)) boundPorts++;
+  if (tryBegin(8080, ahttpServer)) boundPorts++;
+  
+  if (enabledPorts.size() == 0) {
+    Serial.println("[!] WARNING: No ports enabled! Check config file at /config.json");
+    Serial.println("[*] Add port 23 to enable Telnet honeypot");
+    } else if (boundPorts == 0) {
+      Serial.println("[!] ERROR: No ports could be bound! Possible causes:");
+      Serial.println("    - Ports already in use");
+      Serial.println("    - WiFi not connected");
+      Serial.println("    - Out of memory");
   }
+  
+  honeypotServersStarted = true;
+  Serial.println("[+] Honeypot mode active. " + String(boundPorts) + "/" + String(enabledPorts.size()) + " ports successfully bound.");
+  Serial.println("[*] Type 'status' in serial monitor for diagnostics");
 }
 
 
 void setupWebUI() {
-  webServer.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_AP);
+
+  // --- GET / : serve config page ---
+  webServer.on("/", HTTP_GET, []() {
+    File file = SPIFFS.open(indexPath, "r");
+    if (!file) {
+      webServer.send(500, "text/plain", "Unable to open index.html");
+      return;
+    }
+
+    webServer.streamFile(file, "text/html");
+    file.close();
+  });
 
   // --- GET /config : return JSON config file ---
-  webServer.on("/config", HTTP_GET, [](AsyncWebServerRequest * request) {
+  webServer.on("/config", HTTP_GET, []() {
     File file = SPIFFS.open(configPath, "r");
     if (!file) {
-      request->send(500, "application/json", "{\"error\":\"Unable to open config file\"}");
+      webServer.send(500, "application/json", "{\"error\":\"Unable to open config file\"}");
       return;
     }
 
     String json = file.readString();
     file.close();
 
-    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
-    response->addHeader("Cache-Control", "no-store");
-    request->send(response);
+    webServer.sendHeader("Cache-Control", "no-store");
+    webServer.send(200, "application/json", json);
   });
 
   // --- POST /config : overwrite JSON config ---
-  webServer.on("/config", HTTP_POST, [](AsyncWebServerRequest * request) {}, NULL,
-  [](AsyncWebServerRequest * request, uint8_t *data, size_t len, size_t, size_t) {
-    File file = SPIFFS.open(configPath, "w");
-    if (!file) {
-      request->send(500, "text/plain", "Error: Cannot write config file");
+  webServer.on("/config", HTTP_POST, []() {
+    if (!webServer.hasArg("plain")) {
+      webServer.send(400, "application/json", "{\"error\":\"Missing JSON body\"}");
       return;
     }
-    file.write(data, len);
+
+    String body = webServer.arg("plain");
+    File file = SPIFFS.open(configPath, "w");
+    if (!file) {
+      webServer.send(500, "text/plain", "Error: Cannot write config file");
+      return;
+    }
+    file.print(body);
     file.close();
-    request->send(200, "application/json", "{\"status\":\"OK\"}");
+    webServer.send(200, "application/json", "{\"status\":\"OK\"}");
   });
 
   // --- GET /log : return the content of the log file ---
-  webServer.on("/log", HTTP_GET, [](AsyncWebServerRequest * request) {
+  webServer.on("/log", HTTP_GET, []() {
     File file = SPIFFS.open(logPath, "r");
     if (!file) {
-      request->send(500, "text/plain", "Cannot open log file");
+      webServer.send(500, "text/plain", "Cannot open log file");
       return;
     }
 
     String logContent = file.readString();
     file.close();
 
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", logContent);
-    response->addHeader("Cache-Control", "no-store");
-    request->send(response);
+    webServer.sendHeader("Cache-Control", "no-store");
+    webServer.send(200, "text/plain", logContent);
   });
 
   // --- POST /reboot : restart the ESP32 ---
-  webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest * request) {
-    request->send(200, "text/plain", "Rebooting...");
+  webServer.on("/reboot", HTTP_POST, []() {
+    webServer.send(200, "text/plain", "Rebooting...");
     delay(500);
     ESP.restart();
   });
 
   // --- POST /reset : delete config and reboot ---
-  webServer.on("/reset", HTTP_POST, [](AsyncWebServerRequest * request) {
+  webServer.on("/reset", HTTP_POST, []() {
     SPIFFS.remove(configPath);
-    request->send(200, "text/plain", "Configuration reset...");
+    webServer.send(200, "text/plain", "Configuration reset...");
     delay(500);
   });
 
   // Enable AP mode for initial setup
   WiFi.softAP("HoneypotConfig", "HoneyPotConfig123");
+  Serial.println("\n╔════════════════════════════════════════════════╗");
+  Serial.println("║    CONFIGURATION MODE - Access Point Active    ║");
+  Serial.println("╚════════════════════════════════════════════════╝");
   Serial.println("[*] Configuration Mode Enabled");
-  Serial.println("[+] Connect to Wi-Fi: HoneypotConfig");
-  Serial.println("[+] Password        : HoneyPotConfig123");
-  Serial.println("[+] Web Interface   : http://" + WiFi.softAPIP().toString());
+  Serial.println("[+] Connect to Wi-Fi SSID: HoneypotConfig");
+  Serial.println("[+] Password             : HoneyPotConfig123");
+  Serial.println("[+] Web Interface        : http://" + WiFi.softAPIP().toString());
+  Serial.println("\n[HINT] Type 'config' in serial monitor to re-enter config mode anytime\n");
 
   webServer.begin();
+  configPortalActive = true;
 
 }
 
@@ -411,7 +315,7 @@ String escapeJSON(String s) {
     if (c >= 32 || c == '\n' || c == '\r') {
       switch (c) {
         case '\\': result += "\\\\"; break;
-        case '\"': result += "\\\""; break;
+        case '"': result += "\\\""; break;
         case '\n': result += "\\n"; break;
         case '\r': result += "\\r"; break;
         default: result += c; break;
@@ -446,6 +350,93 @@ void logCommand(String ip, uint16_t port, String command) {
   }
 }
 
+
+// Handle serial input to detect "config" command
+// Works with any line ending (CR, LF, CRLF, or no line ending after timeout)
+void handleSerialInput() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    lastSerialInput = millis();
+    
+    // Handle different line endings
+    if (c == '\n' || c == '\r') {
+      // Command received with line ending
+      serialBuffer.trim();
+      serialBuffer.toLowerCase();
+      
+      if (serialBuffer == "config") {
+        Serial.println("\n[*] Config command detected - Entering configuration mode...");
+        // Disconnect from WiFi and reset config mode
+        WiFi.disconnect(true);
+        delay(100);
+        configPortalActive = false;
+        honeypotServersStarted = false;
+        setupWebUI();
+      }
+      else if (serialBuffer == "status" || serialBuffer == "info") {
+        // Print diagnostic information
+        printDiagnostics();
+      }
+      serialBuffer = ""; // Reset buffer
+    } else if (c >= 32) {
+      // Printable character - add to buffer (max 20 chars to prevent overflow)
+      if (serialBuffer.length() < 20) {
+        serialBuffer += c;
+        Serial.print(c); // Echo the character
+      }
+    }
+  }
+  
+  // Check for timeout (user typed "config" without line ending and waited)
+  if (serialBuffer.length() > 0 && (millis() - lastSerialInput > SERIAL_TIMEOUT)) {
+    serialBuffer.trim();
+    serialBuffer.toLowerCase();
+    
+    if (serialBuffer == "config") {
+      Serial.println("\n[*] Config command detected (no line ending) - Entering configuration mode...");
+      // Disconnect from WiFi and reset config mode
+      WiFi.disconnect(true);
+      delay(100);
+      configPortalActive = false;
+      honeypotServersStarted = false;
+      setupWebUI();
+    }
+    serialBuffer = ""; // Reset buffer
+  }
+}
+
+// Print diagnostic information to serial
+void printDiagnostics() {
+  Serial.println("\n╔════════════════════════════════════════════════╗");
+  Serial.println("║           HONEYPOT DIAGNOSTICS                 ║");
+  Serial.println("╚════════════════════════════════════════════════╝");
+  
+  Serial.println("\n[WiFi Status]");
+  Serial.println("  WiFi Status: " + String(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED"));
+  Serial.println("  Local IP: " + WiFi.localIP().toString());
+  Serial.println("  Gateway: " + WiFi.gatewayIP().toString());
+  Serial.println("  SSID: " + String(WiFi.SSID()));
+  Serial.println("  RSSI: " + String(WiFi.RSSI()) + " dBm");
+  Serial.println("  MAC: " + WiFi.macAddress());
+  
+  Serial.println("\n[Server Status]");
+  Serial.println("  Config Portal Active: " + String(configPortalActive ? "YES" : "NO"));
+  Serial.println("  Honeypot Started: " + String(honeypotServersStarted ? "YES" : "NO"));
+  
+  Serial.println("\n[Enabled Ports] (" + String(enabledPorts.size()) + " total)");
+  for (uint16_t port : enabledPorts) {
+    Serial.println("  - Port " + String(port));
+  }
+  
+  Serial.println("\n[Memory Info]");
+  Serial.println("  Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+  Serial.println("  Max Alloc Heap: " + String(ESP.getMaxAllocHeap()) + " bytes");
+  
+  Serial.println("\n[Commands]");
+  Serial.println("  'config' - Enter configuration mode");
+  Serial.println("  'status' - Show this diagnostic info");
+  Serial.println("\n");
+}
 
 String dumpBytes(WiFiClient &c, size_t maxLen = 256, uint32_t timeout = 250) {
   String s;
@@ -492,43 +483,60 @@ void handleBannerGrab(WiFiClient client, uint16_t port, const uint8_t* banner, s
 
 String readLine(WiFiClient &client, bool echo = false) {
   String line = "";
-  while (client.connected()) {
+  unsigned long timeout = millis() + 30000; // 30 second timeout
+  
+  while (client.connected() && millis() < timeout) {
     if (client.available()) {
       char c = client.read();
-      if (c == '\r') {
-        while (client.available()) {
-          char next = client.peek();
-          if (next == '\n' || next == '\0') {
-            client.read();
-          } else {
-            break;
-          }
-        }
-        break;
-      }
-      if (c == '\n' || c == '\0') break;
+      if (c == '\r') continue;
+      if (c == '\n') break;
       line += c;
+      if (echo) client.print(c);
     }
+    delay(10); // Small delay to prevent CPU spinning
   }
+  
+  if (millis() >= timeout) {
+    Serial.println("[!] Telnet timeout on readLine()");
+  }
+  
   return line;
 }
 
 // -- Handle interaction with a single Telnet client --
 void handleHoneypotClient(WiFiClient client) {
-  String remoteIp = client.remoteIP().toString();
-  Serial.println("[HONEYPOT] Telnet client connected from: " + remoteIp);
-  client.println("Honeypot Telnet Service");
-  client.println("--------------------------------");
+  String ip = client.remoteIP().toString();
+  
+  if (!client.connected()) {
+    Serial.println("[!] Client already disconnected");
+    return;
+  }
 
   // Prompt pour le login
   client.print("\r\nlogin: ");
+  client.flush();
   String username = readLine(client, false);  // pas d'écho
-  logCommand(remoteIp, 23, "LOGIN username: " + username);
+  username.trim();
+  
+  if (!client.connected()) {
+    Serial.println("[!] Client disconnected during login");
+    return;
+  }
+  
+  logCommand(ip, 23, "LOGIN username: " + username);
 
   // Prompt pour le password
   client.print("Password: ");
+  client.flush();
   String password = readLine(client, false);
-  logCommand(remoteIp, 23, "LOGIN password: " + password);
+  password.trim();
+  
+  if (!client.connected()) {
+    Serial.println("[!] Client disconnected during password entry");
+    return;
+  }
+  
+  logCommand(ip, 23, "LOGIN password: " + password);
 
   // Simulation d’un login réussi (peu importe les identifiants)
   client.println("\r\nWelcome to Ubuntu 20.04.5 LTS (GNU/Linux 5.4.0-109-generic x86_64)");
@@ -546,7 +554,7 @@ void handleHoneypotClient(WiFiClient client) {
     command.trim();
 
     // Log de la commande
-    logCommand(remoteIp, 23, command);
+    logCommand(client.remoteIP().toString(), 23, command);
 
     //------------------------------------------------
     // 1. Commandes de sortie
@@ -1023,7 +1031,7 @@ void handleHoneypotClient(WiFiClient client) {
       client.println("Codename:       focal");
     }
     else if (command.equals("cat /etc/issue")) {
-      client.println("Ubuntu 20.04.5 LTS \\n \\l");
+      client.println("Ubuntu 20.04.5 LTS \\n+ \\l");
     }
     else if (command.equals("cat /proc/version")) {
       client.println("Linux version 5.4.0-109-generic (buildd@lgw01-amd64-039) (gcc version 9.3.0, GNU ld version 2.34) #123-Ubuntu SMP");
@@ -1095,10 +1103,16 @@ void honeypotLoop() {
     size_t w = c.write(p, n); c.flush(); return w;
   };
   if (WiFiClient c = honeypotServer.available()) {
+    String ip = c.remoteIP().toString();
+    Serial.println("[*] >>> Telnet connection from: " + ip);
+    
     const uint8_t telnetNegotiation[] = {255, 251, 1, 255, 251, 3, 255, 253, 3}; // IAC WILL ECHO, IAC WILL SGA, IAC DO SGA
     c.write(telnetNegotiation, sizeof(telnetNegotiation));
-    delay(10); // courte pause pour que Nmap reçoive bien
+    c.flush();
+    delay(10);
+    
     handleHoneypotClient(c);
+    Serial.println("[*] <<< Telnet client disconnected: " + ip);
   }
 
   /* ---------- FTP : ProFTPD 1.3.7c ---------- */
@@ -1237,37 +1251,59 @@ void honeypotLoop() {
 
 void setup() {
   Serial.begin(115200);
+  delay(500);
+  Serial.println("\n\n╔═══════════════════════════════════════╗");
+  Serial.println("║  ESP32 Honeypot Starting             ║");
+  Serial.println("╚═══════════════════════════════════════╝\n");
+  
   initSPIFFS();
 
   if (!loadConfig()) {
+    Serial.println("[!] No configuration found or invalid config");
+    Serial.println("[*] Entering Configuration Mode (Access Point)");
+    Serial.println("[*] To exit and retry config, type 'config' in serial monitor");
     setupWebUI();
     return;
   }
 
-  WiFi.mode(WIFI_STA);
-  WiFi.softAPdisconnect(true);
-  delay(100);
+  Serial.println("[+] Configuration loaded successfully");
+  Serial.println("[+] SSID: " + ssid);
+  
   WiFi.begin(ssid.c_str(), password.c_str());
   Serial.print("[~] Connecting to Wi-Fi: " + ssid + " ");
 
-
   unsigned long startTime = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startTime < 30000) {
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && millis() - startTime < 5000) {
     delay(1000);
+    Serial.print(".");
+    attempts++;
   }
 
-
-
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\n[!] Wi-Fi connection failed");
+    Serial.println("\n[!] Wi-Fi connection failed after " + String(attempts) + " attempts");
+    Serial.println("[*] Entering Configuration Mode (Access Point)");
+    Serial.println("[*] To try connecting again, type 'config' in serial monitor");
     setupWebUI();
     return;
   }
 
-  Serial.println("\n[+] Connected. IP: " + WiFi.localIP().toString());
-  Serial.println("[HONEYPOT] IP Address: " + WiFi.localIP().toString());
+  Serial.println("\n[+] Connected to WiFi!");
+  Serial.println("[+] Device IP: " + WiFi.localIP().toString());
+  Serial.println("[+] RSSI: " + String(WiFi.RSSI()) + " dBm");
   startHoneypot();
 }
 
 
-void loop() {}
+void loop() {
+  // Always check for serial input to detect config command
+  handleSerialInput();
+  
+  if (configPortalActive) {
+    webServer.handleClient();
+  }
+
+  if (honeypotServersStarted) {
+    honeypotLoop();
+  }
+}
